@@ -528,56 +528,34 @@ app.post('/api/import', requireAuth, async (req, res) => {
     for (const setData of importedSets) {
       if (!setData.name) continue;
 
-      const { rows: existingSets } = await client.query(
-        'SELECT * FROM sets WHERE name = $1 AND user_id = $2',
-        [setData.name, req.userId]
-      );
+      // Upsert set: create or update-timestamp on name collision
+      const { rows: setRows } = await client.query(`
+        INSERT INTO sets (name, user_id, created_at)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (name, user_id) DO UPDATE SET updated_at = NOW()
+        RETURNING id, (xmax = 0) AS is_new
+      `, [setData.name, req.userId, setData.created_at || new Date().toISOString()]);
 
-      let setId;
-      if (existingSets.length > 0) {
-        setId = existingSets[0].id;
-        await client.query('UPDATE sets SET updated_at = NOW() WHERE id = $1', [setId]);
-        setsUpdated++;
-      } else {
-        const { rows } = await client.query(
-          'INSERT INTO sets (name, user_id, created_at) VALUES ($1, $2, $3) RETURNING id',
-          [setData.name, req.userId, setData.created_at || new Date().toISOString()]
-        );
-        setId = rows[0].id;
-        setsCreated++;
-      }
+      const setId = setRows[0].id;
+      if (setRows[0].is_new) setsCreated++; else setsUpdated++;
 
-      if (setData.cards && Array.isArray(setData.cards)) {
-        for (const card of setData.cards) {
-          if (!card.front || !card.back) continue;
-          const front = card.front.trim();
-          const back = card.back.trim();
+      for (const card of (setData.cards || [])) {
+        if (!card.front || !card.back) continue;
+        const front = card.front.trim();
+        const back = card.back.trim();
 
-          const { rows: existingCards } = await client.query(
-            'SELECT * FROM cards WHERE set_id = $1 AND front = $2 AND back = $3',
-            [setId, front, back]
-          );
+        // Upsert card: on collision, keep the higher counts and the imported familiarity
+        const { rows: cardRows } = await client.query(`
+          INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          ON CONFLICT (set_id, front, back) DO UPDATE SET
+            familiarity = EXCLUDED.familiarity,
+            correct_count = GREATEST(EXCLUDED.correct_count, cards.correct_count),
+            incorrect_count = GREATEST(EXCLUDED.incorrect_count, cards.incorrect_count)
+          RETURNING (xmax = 0) AS is_new
+        `, [setId, front, back, card.familiarity || 'unfamiliar', card.correct_count || 0, card.incorrect_count || 0]);
 
-          if (existingCards.length > 0) {
-            const existing = existingCards[0];
-            await client.query(
-              'UPDATE cards SET familiarity = $1, correct_count = $2, incorrect_count = $3 WHERE id = $4',
-              [
-                card.familiarity || existing.familiarity || 'unfamiliar',
-                Math.max(card.correct_count || 0, existing.correct_count || 0),
-                Math.max(card.incorrect_count || 0, existing.incorrect_count || 0),
-                existing.id,
-              ]
-            );
-            cardsUpdated++;
-          } else {
-            await client.query(
-              'INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count) VALUES ($1, $2, $3, $4, $5, $6)',
-              [setId, front, back, card.familiarity || 'unfamiliar', card.correct_count || 0, card.incorrect_count || 0]
-            );
-            cardsCreated++;
-          }
-        }
+        if (cardRows[0].is_new) cardsCreated++; else cardsUpdated++;
       }
     }
 

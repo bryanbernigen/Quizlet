@@ -91,6 +91,38 @@ export async function initDb() {
     END $$
   `);
 
+  // Deduplicate sets: keep the oldest (lowest id) per (name, user_id)
+  await query(`
+    DELETE FROM sets
+    WHERE id NOT IN (SELECT MIN(id) FROM sets GROUP BY name, user_id)
+  `);
+
+  // Unique constraint on sets(name, user_id) — prevents duplicate imports
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unique_set_name_per_user') THEN
+        ALTER TABLE sets ADD CONSTRAINT unique_set_name_per_user UNIQUE (name, user_id);
+      END IF;
+    END $$
+  `);
+
+  // Deduplicate cards: keep the oldest per (set_id, front, back)
+  await query(`
+    DELETE FROM cards
+    WHERE id NOT IN (SELECT MIN(id) FROM cards GROUP BY set_id, front, back)
+  `);
+
+  // Unique constraint on cards(set_id, front, back) — prevents duplicate cards on import
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'unique_card_per_set') THEN
+        ALTER TABLE cards ADD CONSTRAINT unique_card_per_set UNIQUE (set_id, front, back);
+      END IF;
+    END $$
+  `);
+
   // Seed admin user from env vars
   const adminUsername = process.env.ADMIN_USERNAME;
   const adminPassword = process.env.ADMIN_PASSWORD;

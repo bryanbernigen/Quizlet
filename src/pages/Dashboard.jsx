@@ -30,6 +30,14 @@ export default function Dashboard() {
   const total = stats ? (stats.familiarity.familiar + stats.familiarity.neutral + stats.familiarity.unfamiliar) : 0
   const { search, setSearch, sortBy, setSortBy, filteredSets } = useSetFilter(sets)
 
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+
+  useEffect(() => { setPage(1) }, [search, sortBy])
+
+  const totalPages = Math.ceil(filteredSets.length / PAGE_SIZE)
+  const paginatedSets = filteredSets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
   return (
     <motion.div className="page-container" variants={pageVariants} initial="initial" animate="animate" exit="exit">
       {/* Quick Actions */}
@@ -181,7 +189,7 @@ export default function Dashboard() {
             />
           </div>
           <div style={{ display: 'grid', gap: 12 }}>
-            {filteredSets.map(s => (
+            {paginatedSets.map(s => (
               <motion.div
                 key={s.id}
                 className="glass-card"
@@ -219,6 +227,48 @@ export default function Dashboard() {
               </motion.div>
             ))}
           </div>
+
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 20 }}>
+              <motion.button
+                onClick={() => setPage(p => p - 1)}
+                disabled={page === 1}
+                whileHover={page !== 1 ? { scale: 1.05 } : {}}
+                whileTap={page !== 1 ? { scale: 0.95 } : {}}
+                style={{
+                  padding: '8px 20px', borderRadius: 10,
+                  background: page === 1 ? 'transparent' : 'rgba(139, 92, 246, 0.1)',
+                  border: '1px solid var(--border-glass)',
+                  color: page === 1 ? 'var(--text-secondary)' : 'var(--accent-purple)',
+                  fontWeight: 600, fontSize: '0.85rem',
+                  cursor: page === 1 ? 'default' : 'pointer',
+                  fontFamily: 'inherit', opacity: page === 1 ? 0.4 : 1,
+                }}
+              >
+                ← Prev
+              </motion.button>
+              <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 600, minWidth: 90, textAlign: 'center' }}>
+                Page {page} of {totalPages}
+              </span>
+              <motion.button
+                onClick={() => setPage(p => p + 1)}
+                disabled={page === totalPages}
+                whileHover={page !== totalPages ? { scale: 1.05 } : {}}
+                whileTap={page !== totalPages ? { scale: 0.95 } : {}}
+                style={{
+                  padding: '8px 20px', borderRadius: 10,
+                  background: page === totalPages ? 'transparent' : 'rgba(139, 92, 246, 0.1)',
+                  border: '1px solid var(--border-glass)',
+                  color: page === totalPages ? 'var(--text-secondary)' : 'var(--accent-purple)',
+                  fontWeight: 600, fontSize: '0.85rem',
+                  cursor: page === totalPages ? 'default' : 'pointer',
+                  fontFamily: 'inherit', opacity: page === totalPages ? 0.4 : 1,
+                }}
+              >
+                Next →
+              </motion.button>
+            </div>
+          )}
         </div>
       )}
     </motion.div>

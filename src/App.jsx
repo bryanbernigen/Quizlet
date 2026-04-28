@@ -6,7 +6,7 @@ import LoginPage from './pages/LoginPage'
 import { KoreanFlag, IndonesianFlag } from './components/Flag'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
-const CreateSet = lazy(() => import('./pages/CreateSet'))
+const ManageSets = lazy(() => import('./pages/ManageSets'))
 const ReviewMode = lazy(() => import('./pages/ReviewMode'))
 const SpellingQuiz = lazy(() => import('./pages/SpellingQuiz'))
 const EditSet = lazy(() => import('./pages/EditSet'))
@@ -58,8 +58,8 @@ function AppContent() {
           <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             Dashboard
           </NavLink>
-          <NavLink to="/create" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            Add Set
+          <NavLink to="/manage" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            Manage Sets
           </NavLink>
           <NavLink to="/review" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             Review
@@ -81,7 +81,7 @@ function AppContent() {
           <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
-              <Route path="/create" element={<CreateSet />} />
+              <Route path="/manage" element={<ManageSets />} />
               <Route path="/edit/:id" element={<EditSet />} />
               <Route path="/review" element={<ReviewMode />} />
               <Route path="/quiz" element={<SpellingQuiz />} />

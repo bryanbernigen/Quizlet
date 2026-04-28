@@ -2,6 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import { query, getClient, initDb, hashPassword, verifyPassword, generateToken } from './db.js';
 
+// Cross-driver SQL snippets
+const now = () => process.env.DB_TYPE === 'sqlite' ? "datetime('now')" : 'NOW()';
+const int = (expr) => process.env.DB_TYPE === 'sqlite' ? expr : `${expr}::int`;
+const float = (expr) => process.env.DB_TYPE === 'sqlite' ? expr : `${expr}::float`;
+
 const app = express();
 
 app.use(cors({
@@ -31,7 +36,7 @@ async function requireAuth(req, res, next) {
 
   const token = authHeader.slice(7);
   const { rows } = await query(
-    'SELECT user_id FROM sessions WHERE token = $1 AND expires_at > NOW()',
+    `SELECT user_id FROM sessions WHERE token = $1 AND expires_at > ${now()}`,
     [token]
   );
   if (rows.length === 0) {
@@ -54,6 +59,7 @@ async function requireAdmin(req, res, next) {
 
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
+  console.log(username, password)
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required' });
   }
@@ -139,13 +145,13 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) =
 app.get('/api/sets', requireAuth, async (req, res) => {
   const { rows } = await query(`
     SELECT s.*,
-      COUNT(c.id)::int AS card_count,
-      SUM(CASE WHEN c.familiarity = 'familiar' THEN 1 ELSE 0 END)::int AS familiar_count,
-      SUM(CASE WHEN c.familiarity = 'neutral' THEN 1 ELSE 0 END)::int AS neutral_count,
-      SUM(CASE WHEN c.familiarity = 'unfamiliar' THEN 1 ELSE 0 END)::int AS unfamiliar_count,
-      SUM(CASE WHEN c.correct_count > 0 AND c.correct_count >= c.incorrect_count THEN 1 ELSE 0 END)::int AS correct_count,
-      SUM(CASE WHEN c.incorrect_count > 0 AND c.correct_count < c.incorrect_count THEN 1 ELSE 0 END)::int AS incorrect_count,
-      SUM(CASE WHEN c.correct_count = 0 AND c.incorrect_count = 0 THEN 1 ELSE 0 END)::int AS unattempted_count
+      ${int('COUNT(c.id)')} AS card_count,
+      ${int("SUM(CASE WHEN c.familiarity = 'familiar' THEN 1 ELSE 0 END)")} AS familiar_count,
+      ${int("SUM(CASE WHEN c.familiarity = 'neutral' THEN 1 ELSE 0 END)")} AS neutral_count,
+      ${int("SUM(CASE WHEN c.familiarity = 'unfamiliar' THEN 1 ELSE 0 END)")} AS unfamiliar_count,
+      ${int('SUM(CASE WHEN c.correct_count > 0 AND c.correct_count >= c.incorrect_count THEN 1 ELSE 0 END)')} AS correct_count,
+      ${int('SUM(CASE WHEN c.incorrect_count > 0 AND c.correct_count < c.incorrect_count THEN 1 ELSE 0 END)')} AS incorrect_count,
+      ${int('SUM(CASE WHEN c.correct_count = 0 AND c.incorrect_count = 0 THEN 1 ELSE 0 END)')} AS unattempted_count
     FROM sets s
     LEFT JOIN cards c ON c.set_id = s.id
     WHERE s.user_id = $1
@@ -210,7 +216,7 @@ app.put('/api/sets/:id', requireAuth, async (req, res) => {
   try {
     await client.query('BEGIN');
     await client.query(
-      'UPDATE sets SET name = $1, updated_at = NOW() WHERE id = $2',
+      `UPDATE sets SET name = $1, updated_at = ${now()} WHERE id = $2`,
       [name, req.params.id]
     );
 
@@ -441,17 +447,17 @@ app.post('/api/cards/:id/quiz-result', requireAuth, async (req, res) => {
 
 app.get('/api/stats', requireAuth, async (req, res) => {
   const { rows: totalCardsRows } = await query(`
-    SELECT COUNT(*)::int AS count FROM cards c
+    SELECT ${int('COUNT(*)')} AS count FROM cards c
     JOIN sets s ON s.id = c.set_id WHERE s.user_id = $1
   `, [req.userId]);
 
   const { rows: totalSetsRows } = await query(
-    'SELECT COUNT(*)::int AS count FROM sets WHERE user_id = $1',
+    `SELECT ${int('COUNT(*)')} AS count FROM sets WHERE user_id = $1`,
     [req.userId]
   );
 
   const { rows: familiarityRows } = await query(`
-    SELECT c.familiarity, COUNT(*)::int AS count
+    SELECT c.familiarity, ${int('COUNT(*)')} AS count
     FROM cards c JOIN sets s ON s.id = c.set_id
     WHERE s.user_id = $1
     GROUP BY c.familiarity
@@ -462,7 +468,7 @@ app.get('/api/stats', requireAuth, async (req, res) => {
       CASE
         WHEN c.correct_count = 0 AND c.incorrect_count > 0 THEN c.incorrect_count * 100
         WHEN c.correct_count = 0 THEN 0
-        ELSE c.incorrect_count::float / c.correct_count
+        ELSE ${float('c.incorrect_count')} / c.correct_count
       END AS trouble_score
     FROM cards c JOIN sets s ON s.id = c.set_id
     WHERE s.user_id = $1 AND c.incorrect_count > 0
@@ -528,34 +534,60 @@ app.post('/api/import', requireAuth, async (req, res) => {
     for (const setData of importedSets) {
       if (!setData.name) continue;
 
-      // Upsert set: create or update-timestamp on name collision
-      const { rows: setRows } = await client.query(`
-        INSERT INTO sets (name, user_id, created_at)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (name, user_id) DO UPDATE SET updated_at = NOW()
-        RETURNING id, (xmax = 0) AS is_new
-      `, [setData.name, req.userId, setData.created_at || new Date().toISOString()]);
+      const createdAt = setData.created_at || new Date().toISOString();
 
-      const setId = setRows[0].id;
-      if (setRows[0].is_new) setsCreated++; else setsUpdated++;
+      // Check if set already exists (works on both postgres and sqlite)
+      const { rows: existingSet } = await client.query(
+        'SELECT id FROM sets WHERE name = $1 AND user_id = $2',
+        [setData.name, req.userId]
+      );
+
+      let setId;
+      if (existingSet.length > 0) {
+        setId = existingSet[0].id;
+        await client.query('UPDATE sets SET updated_at = datetime("now") WHERE id = $1', [setId]);
+        setsUpdated++;
+      } else {
+        const { rows: newSet } = await client.query(
+          'INSERT INTO sets (name, user_id, created_at) VALUES ($1, $2, $3) RETURNING id',
+          [setData.name, req.userId, createdAt]
+        );
+        setId = newSet[0].id;
+        setsCreated++;
+      }
 
       for (const card of (setData.cards || [])) {
         if (!card.front || !card.back) continue;
         const front = card.front.trim();
         const back = card.back.trim();
+        const familiarity = card.familiarity || 'unfamiliar';
+        const correct = card.correct_count || 0;
+        const incorrect = card.incorrect_count || 0;
 
-        // Upsert card: on collision, keep the higher counts and the imported familiarity
-        const { rows: cardRows } = await client.query(`
-          INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count)
-          VALUES ($1, $2, $3, $4, $5, $6)
-          ON CONFLICT (set_id, front, back) DO UPDATE SET
-            familiarity = EXCLUDED.familiarity,
-            correct_count = GREATEST(EXCLUDED.correct_count, cards.correct_count),
-            incorrect_count = GREATEST(EXCLUDED.incorrect_count, cards.incorrect_count)
-          RETURNING (xmax = 0) AS is_new
-        `, [setId, front, back, card.familiarity || 'unfamiliar', card.correct_count || 0, card.incorrect_count || 0]);
+        const { rows: existingCard } = await client.query(
+          'SELECT id, correct_count, incorrect_count FROM cards WHERE set_id = $1 AND front = $2 AND back = $3',
+          [setId, front, back]
+        );
 
-        if (cardRows[0].is_new) cardsCreated++; else cardsUpdated++;
+        if (existingCard.length > 0) {
+          const existing = existingCard[0];
+          await client.query(
+            'UPDATE cards SET familiarity = $1, correct_count = $2, incorrect_count = $3 WHERE id = $4',
+            [
+              familiarity,
+              Math.max(correct, existing.correct_count),
+              Math.max(incorrect, existing.incorrect_count),
+              existing.id,
+            ]
+          );
+          cardsUpdated++;
+        } else {
+          await client.query(
+            'INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count) VALUES ($1, $2, $3, $4, $5, $6)',
+            [setId, front, back, familiarity, correct, incorrect]
+          );
+          cardsCreated++;
+        }
       }
     }
 

@@ -1,0 +1,17 @@
+services:
+  quizlet-postgres:
+    image: postgres:18-trixie
+    container_name: quizlet-postgres
+    environment:
+      POSTGRES_USER: quizlet
+      POSTGRES_PASSWORD: quizlet
+      POSTGRES_DB: quizlet
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./quizlet-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quizlet -d quizlet"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

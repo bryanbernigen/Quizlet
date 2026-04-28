@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 
 # Database
+/quizlet-postgres-data
 flashcards.db
 flashcards.db-shm
 flashcards.db-wal

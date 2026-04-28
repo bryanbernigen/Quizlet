@@ -3,5 +3,8 @@
     "allow": [
       "Bash(node server/index.js)"
     ]
+  },
+  "enabledPlugins": {
+    "vercel@claude-plugins-official": true
   }
 }

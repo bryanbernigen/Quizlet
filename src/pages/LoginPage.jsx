@@ -103,7 +103,7 @@ export default function LoginPage() {
               whileTap={{ scale: 0.98 }}
               style={{
                 width: '100%', padding: '14px 0', fontSize: '1rem',
-                opacity: loading ? 0.7 : 1,
+                opacity: loading ? 0.7 : 1, textAlign: 'center',
               }}
             >
               {loading ? '...' : '🔑 Log In'}

@@ -36,11 +36,11 @@ export default function WordBrowser() {
   const fetchCards = async (famFilter) => {
     setLoading(true)
     const url = famFilter
-      ? `/api/cards/browse?familiarity=${famFilter}`
-      : '/api/cards/browse'
+      ? `/api/cards/browse?familiarity=${famFilter}&limit=100`
+      : '/api/cards/browse?limit=100'
     const res = await apiFetch(url)
-    const data = await res.json()
-    setCards(data)
+    const result = await res.json()
+    setCards(result.data || [])
     setLoading(false)
   }
 

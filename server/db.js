@@ -43,6 +43,23 @@ function querySqlite(text, params) {
   if (params && params.length > 0) {
     sqliteText = text.replace(/\$[0-9]+/g, () => '?');
   }
+
+  // Handle RETURNING clause — sqlite doesn't support it natively
+  const returningMatch = sqliteText.match(/RETURNING\s+(.+?)\s*$/i);
+  if (returningMatch) {
+    const returningCols = returningMatch[1].split(',').map(c => c.trim());
+    sqliteText = sqliteText.replace(/RETURNING\s+.+$/i, '');
+    const stmt = sqliteDb.prepare(sqliteText);
+    const info = stmt.run(...(params || []));
+    const lastId = info.lastInsertRowid;
+    // For INSERT ... RETURNING id, query the inserted row
+    if (returningCols.length === 1 && returningCols[0] === 'id') {
+      const row = sqliteDb.prepare(`SELECT ${returningCols[0]} FROM ${sqliteText.match(/INTO\s+(\w+)/i)[1]} WHERE rowid = ?`).get(lastId);
+      return { rows: row ? [row] : [] };
+    }
+    return { rows: [], lastInsertRowid: lastId, changes: info.changes };
+  }
+
   const stmt = sqliteDb.prepare(sqliteText);
   let result;
   if (text.trim().toUpperCase().startsWith('SELECT')) {

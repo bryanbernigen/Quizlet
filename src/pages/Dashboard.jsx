@@ -31,7 +31,11 @@ export default function Dashboard() {
   const deleteSet = async (id) => {
     if (!confirm('Delete this set and all its cards?')) return
     await apiFetch(`/api/sets/${id}`, { method: 'DELETE' })
-    setSets(sets.filter(s => s.id !== id))
+    const remaining = sets.filter(s => s.id !== id)
+    setSets(remaining)
+    // If current page is now beyond total pages, go back one
+    const newTotalPages = Math.max(1, Math.ceil(remaining.length / PAGE_SIZE))
+    if (page > newTotalPages) setPage(newTotalPages)
     apiFetch('/api/stats').then(r => r.json()).then(setStats)
   }
 
@@ -246,7 +250,7 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {totalPages > 1 && (
+          {totalPages > 0 && (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 20 }}>
               <motion.button
                 onClick={() => setPage(p => p - 1)}

@@ -7,7 +7,12 @@
       "Bash(node *)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Count: {len\\(d\\)}'\\)\")",
       "Bash(npm run *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm *)"
     ]
   },
   "enabledPlugins": {

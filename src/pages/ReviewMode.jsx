@@ -151,12 +151,40 @@ export default function ReviewMode() {
             <p style={{ color: 'var(--text-secondary)' }}>No sets found. Create one first!</p>
           ) : (
             <>
-              <div style={{ marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
                 <SetFilter
                   search={search} onSearchChange={setSearch}
                   sortBy={sortBy} onSortChange={setSortBy}
                   totalCount={sets.length} filteredCount={filteredSets.length}
                 />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <motion.button
+                    type="button"
+                    onClick={() => {
+                      const allSelected = filteredSets.every(s => selectedSets.includes(s.id))
+                      if (allSelected) {
+                        setSelectedSets(prev => prev.filter(id => !filteredSets.some(f => f.id === id)))
+                      } else {
+                        setSelectedSets(prev => [...new Set([...prev, ...filteredSets.map(s => s.id)])])
+                      }
+                    }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    style={{
+                      padding: '6px 14px', borderRadius: 8,
+                      background: 'rgba(139, 92, 246, 0.12)',
+                      border: '1px solid rgba(139, 92, 246, 0.35)',
+                      color: 'var(--accent-purple)',
+                      fontSize: '0.78rem', fontWeight: 700,
+                      cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    {filteredSets.every(s => selectedSets.includes(s.id)) ? 'Deselect All' : 'Select All'}
+                  </motion.button>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                    {selectedSets.length} selected
+                  </span>
+                </div>
               </div>
               <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
                 {filteredSets.map(s => (

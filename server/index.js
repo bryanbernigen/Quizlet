@@ -544,7 +544,7 @@ app.post('/api/import', requireAuth, async (req, res) => {
       let setId;
       if (existingSet.length > 0) {
         setId = existingSet[0].id;
-        await client.query('UPDATE sets SET updated_at = datetime(\'now\') WHERE id = $1', [setId]);
+        await client.query(`UPDATE sets SET updated_at = ${now()} WHERE id = $1`, [setId]);
         setsUpdated++;
       } else {
         const { rows: newSet } = await client.query(

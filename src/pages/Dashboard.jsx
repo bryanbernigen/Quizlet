@@ -13,11 +13,19 @@ const pageVariants = {
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
   const [sets, setSets] = useState([])
+  const [error, setError] = useState('')
   const apiFetch = useApiFetch()
 
   useEffect(() => {
-    apiFetch('/api/stats').then(r => r.json()).then(setStats)
-    apiFetch('/api/sets').then(r => r.json()).then(setSets)
+    Promise.all([
+      apiFetch('/api/stats').then(r => r.json()),
+      apiFetch('/api/sets').then(r => r.json()),
+    ]).then(([s, setData]) => {
+      setStats(s)
+      setSets(setData)
+    }).catch(() => {
+      setError('Failed to load data. Please refresh the page.')
+    })
   }, [apiFetch])
 
   const deleteSet = async (id) => {
@@ -88,6 +96,16 @@ export default function Dashboard() {
           </Link>
         </div>
       </div>
+
+      {error && (
+        <div style={{
+          marginBottom: 24, padding: '12px 20px', borderRadius: 12,
+          background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)',
+          color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600,
+        }}>
+          {error}
+        </div>
+      )}
 
       {/* Stats */}
       {stats && (

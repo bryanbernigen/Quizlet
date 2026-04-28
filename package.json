@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "cors": "^2.8.6",
+    "country-flag-icons": "^1.6.16",
     "express": "^5.2.1",
     "framer-motion": "^12.38.0",
     "pg": "^8.13.3",

@@ -17,6 +17,7 @@ export default function CreateSet() {
   const [cardDelimiter, setCardDelimiter] = useState('\\n')
   const [langDelimiter, setLangDelimiter] = useState(' - ')
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   // Parse delimiter strings (handle escape sequences)
   const parseDelimiter = (d) => {
@@ -45,6 +46,7 @@ export default function CreateSet() {
   const handleSubmit = async () => {
     if (!name.trim() || validCards.length === 0) return
     setSaving(true)
+    setSaveError('')
     try {
       const res = await apiFetch('/api/sets', {
         method: 'POST',
@@ -56,11 +58,15 @@ export default function CreateSet() {
       })
       if (res.ok) {
         navigate('/')
+      } else {
+        const data = await res.json()
+        setSaveError(data.error || 'Failed to save. Please try again.')
       }
     } catch (e) {
-      console.error(e)
+      setSaveError('Network error. Please check your connection.')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   return (
@@ -168,6 +174,17 @@ export default function CreateSet() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Error */}
+      {saveError && (
+        <div style={{
+          marginBottom: 16, padding: '10px 16px', borderRadius: 10,
+          background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)',
+          color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600,
+        }}>
+          {saveError}
         </div>
       )}
 

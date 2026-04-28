@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import SetFilter, { useSetFilter } from '../components/SetFilter'
 import CardFilters, { useCardFilters } from '../components/CardFilters'
+import { KoreanFlag, IndonesianFlag } from '../components/Flag'
 import { useApiFetch } from '../context/AuthContext'
 
 const pageVariants = {
@@ -22,15 +23,21 @@ export default function SpellingQuiz() {
   const [completed, setCompleted] = useState(false)
   const [score, setScore] = useState({ correct: 0, incorrect: 0 })
   const [history, setHistory] = useState([]) // { question, answer, userAnswer, correct }
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const inputRef = useRef(null)
-  const [frontLang, setFrontLang] = useState('korean') // 'korean' or 'indonesian'
+  const [frontLang, setFrontLang] = useState('indonesian') // 'korean' or 'indonesian'
   const { familiarityFilter, attemptFilter, toggleFamiliarity, toggleAttempt, buildQueryParams } = useCardFilters()
   const apiFetch = useApiFetch()
 
   const getQuestion = (c) => frontLang === 'korean' ? c.front : c.back
   const getAnswer = (c) => frontLang === 'korean' ? c.back : c.front
-  const questionLabel = frontLang === 'korean' ? 'Korean' : 'Indonesian'
-  const answerLabel = frontLang === 'korean' ? 'Indonesian' : 'Korean'
+  const questionLabel = frontLang === 'korean'
+    ? <><KoreanFlag /> Korean</>
+    : <><IndonesianFlag /> Indonesian</>
+  const answerLabel = frontLang === 'korean'
+    ? <><IndonesianFlag /> Indonesian</>
+    : <><KoreanFlag /> Korean</>
 
   useEffect(() => {
     apiFetch('/api/sets').then(r => r.json()).then(setSets)
@@ -46,20 +53,32 @@ export default function SpellingQuiz() {
 
   const startQuiz = async () => {
     if (selectedSets.length === 0) return
-    const filterParams = buildQueryParams()
-    const url = `/api/cards/quiz?setIds=${selectedSets.join(',')}&count=${questionCount}${filterParams ? '&' + filterParams : ''}`
-    const res = await apiFetch(url)
-    const data = await res.json()
-    if (data.length === 0) return
-    setCards(data)
-    setCurrentIndex(0)
-    setAnswer('')
-    setFeedback(null)
-    setStarted(true)
-    setCompleted(false)
-    setScore({ correct: 0, incorrect: 0 })
-    setHistory([])
-    setTimeout(() => inputRef.current?.focus(), 100)
+    setLoading(true)
+    setLoadError('')
+    try {
+      const filterParams = buildQueryParams()
+      const url = `/api/cards/quiz?setIds=${selectedSets.join(',')}&count=${questionCount}${filterParams ? '&' + filterParams : ''}`
+      const res = await apiFetch(url)
+      const data = await res.json()
+      if (data.length === 0) {
+        setLoadError('No cards match your selected filters. Try adjusting your filter settings.')
+        setLoading(false)
+        return
+      }
+      setCards(data)
+      setCurrentIndex(0)
+      setAnswer('')
+      setFeedback(null)
+      setStarted(true)
+      setCompleted(false)
+      setScore({ correct: 0, incorrect: 0 })
+      setHistory([])
+      setTimeout(() => inputRef.current?.focus(), 100)
+    } catch (e) {
+      setLoadError('Failed to load cards. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const checkAnswer = async () => {
@@ -184,49 +203,72 @@ export default function SpellingQuiz() {
           </div>
           <div>
             <label className="form-label">Show First</label>
-            <div style={{ display: 'flex', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-glass)' }}>
-              <button
-                onClick={() => setFrontLang('korean')}
-                style={{
-                  flex: 1, padding: '12px 8px', border: 'none', cursor: 'pointer',
-                  background: frontLang === 'korean' ? 'rgba(139, 92, 246, 0.25)' : 'transparent',
-                  color: frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                  fontWeight: 600, fontSize: '0.85rem', fontFamily: 'inherit',
-                  transition: 'all 0.2s',
-                }}
-              >
-                🇰🇷 Korean
-              </button>
-              <button
+            <div style={{ display: 'flex', gap: 8 }}>
+              <motion.button
+                type="button"
                 onClick={() => setFrontLang('indonesian')}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
                 style={{
-                  flex: 1, padding: '12px 8px', border: 'none', cursor: 'pointer',
-                  borderLeft: '1px solid var(--border-glass)',
-                  background: frontLang === 'indonesian' ? 'rgba(139, 92, 246, 0.25)' : 'transparent',
+                  flex: 1, padding: '10px 8px',
+                  borderRadius: 12,
+                  background: frontLang === 'indonesian' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
                   color: frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                  fontWeight: 600, fontSize: '0.85rem', fontFamily: 'inherit',
+                  fontWeight: 600, fontSize: '0.9rem',
+                  cursor: 'pointer', fontFamily: 'inherit',
                   transition: 'all 0.2s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 }}
               >
-                🇮🇩 Indonesian
-              </button>
+                <IndonesianFlag size={18} /> Indonesian
+              </motion.button>
+              <motion.button
+                type="button"
+                onClick={() => setFrontLang('korean')}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                style={{
+                  flex: 1, padding: '10px 8px',
+                  borderRadius: 12,
+                  background: frontLang === 'korean' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
+                  color: frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                  fontWeight: 600, fontSize: '0.9rem',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'all 0.2s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <KoreanFlag size={18} /> Korean
+              </motion.button>
             </div>
           </div>
         </div>
 
+        {loadError && (
+          <div style={{
+            marginBottom: 16, padding: '10px 16px', borderRadius: 10,
+            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)',
+            color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600,
+          }}>
+            {loadError}
+          </div>
+        )}
+
         <motion.button
           className="btn-primary"
           onClick={startQuiz}
-          disabled={selectedSets.length === 0}
+          disabled={selectedSets.length === 0 || loading}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           style={{
-            opacity: selectedSets.length === 0 ? 0.5 : 1,
+            opacity: (selectedSets.length === 0 || loading) ? 0.5 : 1,
             fontSize: '1rem',
             padding: '14px 36px',
           }}
         >
-          ✏️ Start Quiz
+          {loading ? '⏳ Loading...' : '✏️ Start Quiz'}
         </motion.button>
       </motion.div>
     )

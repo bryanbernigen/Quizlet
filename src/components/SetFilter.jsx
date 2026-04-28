@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 
 const SORT_OPTIONS = [
   { value: 'updated_desc', label: '🕐 Last Updated' },
@@ -69,24 +69,86 @@ export default function SetFilter({ search, onSearchChange, sortBy, onSortChange
         )}
       </div>
 
-      <select
+      <CustomDropdown
         value={sortBy}
-        onChange={e => onSortChange(e.target.value)}
-        className="form-input"
-        style={{
-          width: 'auto', minWidth: 170, padding: '10px 14px',
-          fontSize: '0.85rem', cursor: 'pointer',
-        }}
-      >
-        {SORT_OPTIONS.map(o => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
+        onChange={onSortChange}
+        options={SORT_OPTIONS}
+      />
 
       {search && totalCount !== filteredCount && (
         <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
           {filteredCount} of {totalCount}
         </span>
+      )}
+    </div>
+  )
+}
+
+function CustomDropdown({ value, onChange, options }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const selected = options.find(o => o.value === value)
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="form-input"
+        style={{
+          width: 'auto', minWidth: 170, padding: '10px 36px 10px 14px',
+          fontSize: '0.85rem', cursor: 'pointer',
+          background: 'rgba(255,255,255,0.05)',
+          appearance: 'none',
+          textAlign: 'left',
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'right 12px center',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        {selected?.label || 'Select...'}
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, zIndex: 200,
+          background: 'rgba(17, 24, 39, 0.98)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: 10, overflow: 'hidden',
+          backdropFilter: 'blur(16px)',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+        }}>
+          {options.map(o => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => { onChange(o.value); setOpen(false) }}
+              style={{
+                display: 'block', width: '100%', padding: '10px 14px',
+                background: o.value === value ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                color: o.value === value ? 'var(--accent-purple)' : 'var(--text-primary)',
+                border: 'none', cursor: 'pointer',
+                fontSize: '0.85rem', fontFamily: 'inherit', fontWeight: 500,
+                textAlign: 'left',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => { if (o.value !== value) e.currentTarget.style.background = 'rgba(255,255,255,0.05)' }}
+              onMouseLeave={e => { if (o.value !== value) e.currentTarget.style.background = 'transparent' }}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )

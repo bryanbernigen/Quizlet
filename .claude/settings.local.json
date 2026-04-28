@@ -4,7 +4,10 @@
       "Bash(node server/index.js)",
       "WebFetch(domain:quizlet-orcin.vercel.app)",
       "Bash(curl *)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(f'Count: {len\\(d\\)}'\\)\")",
+      "Bash(npm run *)",
+      "Bash(npm install *)"
     ]
   },
   "enabledPlugins": {

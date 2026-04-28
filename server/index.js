@@ -172,7 +172,7 @@ app.post('/api/sets', requireAuth, async (req, res) => {
     const setId = rows[0].id;
     const validCards = cards.filter(c => c.front && c.back);
     if (validCards.length > 0) {
-      const placeholders = validCards.map((_, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3})`).join(', ');
+      const placeholders = validCards.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ');
       const flatParams = validCards.flatMap(c => [setId, c.front.trim(), c.back.trim()]);
       await client.query(
         `INSERT INTO cards (set_id, front, back) VALUES ${placeholders}`,
@@ -596,9 +596,7 @@ app.post('/api/import', requireAuth, async (req, res) => {
   const cardsToUpdate = [];
 
   for (const setData of validSets) {
-    const setId = typeof setMap.get(setData.name) === 'number'
-      ? setMap.get(setData.name)
-      : setMap.get(setData.name).id;
+    const setId = setMap.get(setData.name).id;
     for (const card of setData.cards) {
       if (!card.front || !card.back) continue;
       const front = card.front.trim();
@@ -623,7 +621,7 @@ app.post('/api/import', requireAuth, async (req, res) => {
 
   // Batch insert new cards
   if (cardsToInsert.length > 0) {
-    const placeholders = cardsToInsert.map((_, i) => `($1, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
+    const placeholders = cardsToInsert.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
     const flatParams = cardsToInsert.flatMap(c => [c.setId, c.front, c.back, c.familiarity, c.correct, c.incorrect]);
     await query(`INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count) VALUES ${placeholders}`, flatParams);
   }

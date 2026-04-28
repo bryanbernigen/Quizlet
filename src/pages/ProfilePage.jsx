@@ -40,6 +40,11 @@ export default function ProfilePage() {
 
   const handleExport = async () => {
     const res = await apiFetch('/api/export')
+    if (!res.ok) {
+      const data = await res.json()
+      setImportStatus({ type: 'error', message: `❌ Export failed: ${data.error || 'Unknown error'}` })
+      return
+    }
     const data = await res.json()
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)

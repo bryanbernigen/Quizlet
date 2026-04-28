@@ -19,6 +19,8 @@ export default function EditSet() {
   const [langDelimiter, setLangDelimiter] = useState(' - ')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [saveError, setSaveError] = useState('')
 
   const parseDelimiter = (d) => {
     return d.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\r/g, '\r')
@@ -45,6 +47,7 @@ export default function EditSet() {
         }
       } catch (e) {
         console.error('Failed to load set:', e)
+        setLoadError('Failed to load set. Please try again.')
       }
       setLoading(false)
     }
@@ -73,6 +76,7 @@ export default function EditSet() {
   const handleSave = async () => {
     if (!name.trim() || validCards.length === 0) return
     setSaving(true)
+    setSaveError('')
     try {
       const res = await apiFetch(`/api/sets/${id}`, {
         method: 'PUT',
@@ -84,11 +88,15 @@ export default function EditSet() {
       })
       if (res.ok) {
         navigate('/')
+      } else {
+        const data = await res.json()
+        setSaveError(data.error || 'Failed to save. Please try again.')
       }
     } catch (e) {
-      console.error(e)
+      setSaveError('Network error. Please check your connection.')
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   if (loading) {
@@ -97,6 +105,17 @@ export default function EditSet() {
         style={{ textAlign: 'center', paddingTop: 80 }}>
         <div style={{ fontSize: '2rem', marginBottom: 16 }}>⏳</div>
         <p style={{ color: 'var(--text-secondary)' }}>Loading set...</p>
+      </motion.div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <motion.div className="page-container" variants={pageVariants} initial="initial" animate="animate" exit="exit"
+        style={{ textAlign: 'center', paddingTop: 80 }}>
+        <div style={{ fontSize: '2rem', marginBottom: 16 }}>⚠️</div>
+        <p style={{ color: 'var(--accent-red)', marginBottom: 16 }}>{loadError}</p>
+        <button className="btn-secondary" onClick={() => navigate('/')}>← Back to Dashboard</button>
       </motion.div>
     )
   }
@@ -206,6 +225,17 @@ export default function EditSet() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* Save error */}
+      {saveError && (
+        <div style={{
+          marginBottom: 16, padding: '10px 16px', borderRadius: 10,
+          background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)',
+          color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600,
+        }}>
+          {saveError}
         </div>
       )}
 

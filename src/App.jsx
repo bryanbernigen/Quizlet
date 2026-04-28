@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { lazy, Suspense } from 'react'
 import LoginPage from './pages/LoginPage'
+import { KoreanFlag, IndonesianFlag } from './components/Flag'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const CreateSet = lazy(() => import('./pages/CreateSet'))
@@ -14,12 +15,14 @@ const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 
 function PageLoader() {
   return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexDirection: 'column', gap: 16,
+    <div className="glass-card-strong" style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexDirection: 'column', gap: 20, margin: 48, borderRadius: 20,
     }}>
-      <div style={{ fontSize: '2.5rem' }}>🇰🇷 🇮🇩</div>
-      <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Loading...</div>
+      <div style={{ display: 'flex', gap: 8, fontSize: '2rem' }}>
+        <KoreanFlag size={32} /><IndonesianFlag size={32} />
+      </div>
+      <div style={{ color: 'var(--text-secondary)', fontWeight: 600, fontSize: '0.95rem' }}>Loading...</div>
     </div>
   )
 }
@@ -33,7 +36,9 @@ function AppContent() {
         minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexDirection: 'column', gap: 16,
       }}>
-        <div style={{ fontSize: '2.5rem' }}>🇰🇷 🇮🇩</div>
+        <div style={{ display: 'flex', gap: 8, fontSize: '2rem' }}>
+          <KoreanFlag size={32} /><IndonesianFlag size={32} />
+        </div>
         <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Loading...</div>
       </div>
     )
@@ -46,7 +51,9 @@ function AppContent() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <nav className="nav-bar">
-        <NavLink to="/" className="nav-logo">🇰🇷 KoreaQuiz 🇮🇩</NavLink>
+        <NavLink to="/" className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <KoreanFlag size={20} /> KoreaQuiz <IndonesianFlag size={20} />
+        </NavLink>
         <div className="nav-links">
           <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
             Dashboard

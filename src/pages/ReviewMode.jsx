@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import SetFilter, { useSetFilter } from '../components/SetFilter'
 import CardFilters, { useCardFilters } from '../components/CardFilters'
+import { KoreanFlag, IndonesianFlag } from '../components/Flag'
 import { useApiFetch } from '../context/AuthContext'
 
 const pageVariants = {
@@ -23,16 +24,22 @@ export default function ReviewMode() {
   const [swiping, setSwiping] = useState(false)
   const [exitDirection, setExitDirection] = useState({ x: 0, y: 0 })
   const [showCard, setShowCard] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState('')
   const swipingRef = useRef(false)
-  const [frontLang, setFrontLang] = useState('korean') // 'korean' or 'indonesian'
+  const [frontLang, setFrontLang] = useState('indonesian') // 'korean' or 'indonesian'
   const { familiarityFilter, attemptFilter, toggleFamiliarity, toggleAttempt, buildQueryParams } = useCardFilters()
   const apiFetch = useApiFetch()
 
   // Helper to get the displayed front/back based on frontLang
   const getFront = (c) => frontLang === 'korean' ? c.front : c.back
   const getBack = (c) => frontLang === 'korean' ? c.back : c.front
-  const frontLabel = frontLang === 'korean' ? 'Korean' : 'Indonesian'
-  const backLabel = frontLang === 'korean' ? 'Indonesian' : 'Korean'
+  const frontLabel = frontLang === 'korean'
+    ? <><KoreanFlag /> Korean</>
+    : <><IndonesianFlag /> Indonesian</>
+  const backLabel = frontLang === 'korean'
+    ? <><IndonesianFlag /> Indonesian</>
+    : <><KoreanFlag /> Korean</>
 
   useEffect(() => {
     apiFetch('/api/sets').then(r => r.json()).then(setSets)
@@ -48,20 +55,32 @@ export default function ReviewMode() {
 
   const startReview = async () => {
     if (selectedSets.length === 0) return
-    const filterParams = buildQueryParams()
-    const url = `/api/cards/review?setIds=${selectedSets.join(',')}&count=${cardCount}${filterParams ? '&' + filterParams : ''}`
-    const res = await apiFetch(url)
-    const data = await res.json()
-    if (data.length === 0) return
-    setCards(data)
-    setCurrentIndex(0)
-    setIsFlipped(false)
-    setStarted(true)
-    setCompleted(false)
-    setShowCard(true)
-    setSwiping(false)
-    swipingRef.current = false
-    setResults({ familiar: 0, neutral: 0, unfamiliar: 0 })
+    setLoading(true)
+    setLoadError('')
+    try {
+      const filterParams = buildQueryParams()
+      const url = `/api/cards/review?setIds=${selectedSets.join(',')}&count=${cardCount}${filterParams ? '&' + filterParams : ''}`
+      const res = await apiFetch(url)
+      const data = await res.json()
+      if (data.length === 0) {
+        setLoadError('No cards match your selected filters. Try adjusting your filter settings.')
+        setLoading(false)
+        return
+      }
+      setCards(data)
+      setCurrentIndex(0)
+      setIsFlipped(false)
+      setStarted(true)
+      setCompleted(false)
+      setShowCard(true)
+      setSwiping(false)
+      swipingRef.current = false
+      setResults({ familiar: 0, neutral: 0, unfamiliar: 0 })
+    } catch (e) {
+      setLoadError('Failed to load cards. Please try again.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const advanceCard = (familiarity) => {
@@ -199,15 +218,16 @@ export default function ReviewMode() {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
                 style={{
-                  padding: '0 12px',
-                  borderRadius: '12px',
+                  padding: '0 14px',
+                  borderRadius: 12,
                   background: 'rgba(139, 92, 246, 0.1)',
                   border: '1px solid var(--border-glass)',
                   color: 'var(--accent-purple)',
-                  fontSize: '0.75rem',
+                  fontSize: '0.8rem',
                   fontWeight: 700,
                   cursor: 'pointer',
-                  opacity: selectedSets.length === 0 ? 0.5 : 1
+                  opacity: selectedSets.length === 0 ? 0.5 : 1,
+                  fontFamily: 'inherit',
                 }}
               >
                 ALL
@@ -216,49 +236,72 @@ export default function ReviewMode() {
           </div>
           <div>
             <label className="form-label">Show First</label>
-            <div style={{ display: 'flex', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border-glass)' }}>
-              <button
-                onClick={() => setFrontLang('korean')}
-                style={{
-                  flex: 1, padding: '12px 8px', border: 'none', cursor: 'pointer',
-                  background: frontLang === 'korean' ? 'rgba(139, 92, 246, 0.25)' : 'transparent',
-                  color: frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                  fontWeight: 600, fontSize: '0.85rem', fontFamily: 'inherit',
-                  transition: 'all 0.2s',
-                }}
-              >
-                🇰🇷 Korean
-              </button>
-              <button
+            <div style={{ display: 'flex', gap: 8 }}>
+              <motion.button
+                type="button"
                 onClick={() => setFrontLang('indonesian')}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
                 style={{
-                  flex: 1, padding: '12px 8px', border: 'none', cursor: 'pointer',
-                  borderLeft: '1px solid var(--border-glass)',
-                  background: frontLang === 'indonesian' ? 'rgba(139, 92, 246, 0.25)' : 'transparent',
+                  flex: 1, padding: '10px 8px',
+                  borderRadius: 12,
+                  background: frontLang === 'indonesian' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
                   color: frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                  fontWeight: 600, fontSize: '0.85rem', fontFamily: 'inherit',
+                  fontWeight: 600, fontSize: '0.9rem',
+                  cursor: 'pointer', fontFamily: 'inherit',
                   transition: 'all 0.2s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 }}
               >
-                🇮🇩 Indonesian
-              </button>
+                <IndonesianFlag size={18} /> Indonesian
+              </motion.button>
+              <motion.button
+                type="button"
+                onClick={() => setFrontLang('korean')}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                style={{
+                  flex: 1, padding: '10px 8px',
+                  borderRadius: 12,
+                  background: frontLang === 'korean' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                  border: `1px solid ${frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
+                  color: frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                  fontWeight: 600, fontSize: '0.9rem',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  transition: 'all 0.2s',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <KoreanFlag size={18} /> Korean
+              </motion.button>
             </div>
           </div>
         </div>
 
+        {loadError && (
+          <div style={{
+            marginBottom: 16, padding: '10px 16px', borderRadius: 10,
+            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)',
+            color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600,
+          }}>
+            {loadError}
+          </div>
+        )}
+
         <motion.button
           className="btn-primary"
           onClick={startReview}
-          disabled={selectedSets.length === 0}
+          disabled={selectedSets.length === 0 || loading}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           style={{
-            opacity: selectedSets.length === 0 ? 0.5 : 1,
+            opacity: (selectedSets.length === 0 || loading) ? 0.5 : 1,
             fontSize: '1rem',
             padding: '14px 36px',
           }}
         >
-          🚀 Start Review
+          {loading ? '⏳ Loading...' : '🚀 Start Review'}
         </motion.button>
       </motion.div>
     )

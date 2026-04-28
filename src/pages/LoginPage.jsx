@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { useAuth } from '../context/AuthContext'
+import { KoreanFlag, IndonesianFlag } from '../components/Flag'
 
 const pageVariants = {
   initial: { opacity: 0, y: 20 },
@@ -43,7 +44,9 @@ export default function LoginPage() {
         style={{ width: '100%', maxWidth: 420 }}
       >
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
-          <div style={{ fontSize: '3rem', marginBottom: 12 }}>🇰🇷 🇮🇩</div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 12, fontSize: '3rem' }}>
+            <KoreanFlag size={48} /><IndonesianFlag size={48} />
+          </div>
           <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>
             <span className="gradient-text">KoreaQuiz</span>
           </h1>

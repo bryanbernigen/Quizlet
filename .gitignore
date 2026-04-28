@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Database
+flashcards.db
+flashcards.db-shm
+flashcards.db-wal
+.env

@@ -1,7 +1,5 @@
 @import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
-
 :root {
   --bg-primary: #0a0e1a;
   --bg-secondary: #111827;
@@ -104,8 +102,9 @@ body::before {
   font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.3s ease;
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   text-decoration: none;
 }

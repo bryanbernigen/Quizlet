@@ -1,14 +1,28 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { lazy, Suspense } from 'react'
 import LoginPage from './pages/LoginPage'
-import Dashboard from './pages/Dashboard'
-import CreateSet from './pages/CreateSet'
-import ReviewMode from './pages/ReviewMode'
-import SpellingQuiz from './pages/SpellingQuiz'
-import EditSet from './pages/EditSet'
-import WordBrowser from './pages/WordBrowser'
-import ProfilePage from './pages/ProfilePage'
+
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const CreateSet = lazy(() => import('./pages/CreateSet'))
+const ReviewMode = lazy(() => import('./pages/ReviewMode'))
+const SpellingQuiz = lazy(() => import('./pages/SpellingQuiz'))
+const EditSet = lazy(() => import('./pages/EditSet'))
+const WordBrowser = lazy(() => import('./pages/WordBrowser'))
+const ProfilePage = lazy(() => import('./pages/ProfilePage'))
+
+function PageLoader() {
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexDirection: 'column', gap: 16,
+    }}>
+      <div style={{ fontSize: '2.5rem' }}>🇰🇷 🇮🇩</div>
+      <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Loading...</div>
+    </div>
+  )
+}
 
 function AppContent() {
   const { user, loading } = useAuth()
@@ -57,15 +71,17 @@ function AppContent() {
 
       <div style={{ flex: 1 }}>
         <AnimatePresence mode="wait">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/create" element={<CreateSet />} />
-            <Route path="/edit/:id" element={<EditSet />} />
-            <Route path="/review" element={<ReviewMode />} />
-            <Route path="/quiz" element={<SpellingQuiz />} />
-            <Route path="/words" element={<WordBrowser />} />
-            <Route path="/profile" element={<ProfilePage />} />
-          </Routes>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/create" element={<CreateSet />} />
+              <Route path="/edit/:id" element={<EditSet />} />
+              <Route path="/review" element={<ReviewMode />} />
+              <Route path="/quiz" element={<SpellingQuiz />} />
+              <Route path="/words" element={<WordBrowser />} />
+              <Route path="/profile" element={<ProfilePage />} />
+            </Routes>
+          </Suspense>
         </AnimatePresence>
       </div>
     </div>

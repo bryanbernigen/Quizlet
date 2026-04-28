@@ -233,7 +233,19 @@ async function initDbPostgres() {
   `);
 
   await seedAdminPostgres();
+
+  // Performance indexes
+  for (const sql of [
+    'CREATE INDEX IF NOT EXISTS idx_cards_set_id ON cards(set_id)',
+    'CREATE INDEX IF NOT EXISTS idx_cards_familiarity ON cards(familiarity)',
+    'CREATE INDEX IF NOT EXISTS idx_sessions_token_expires ON sessions(token, expires_at)',
+    'CREATE INDEX IF NOT EXISTS idx_sets_user_id ON sets(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_sets_updated_at ON sets(updated_at)',
+  ]) {
+    await query(sql);
+  }
 }
+
 
 async function initDbSqlite() {
   initSqlite();
@@ -325,8 +337,24 @@ async function initDbSqlite() {
     sqliteDb.exec('CREATE UNIQUE INDEX IF NOT EXISTS unique_card_per_set ON cards(set_id, front, back)');
   }
 
-  seedAdminSqlite();
+  await seedAdminSqlite();
+
+  // Performance indexes
+  const existingIndexes = sqliteDb.pragma('index_list(cards)').map(i => i.name);
+  const indexDefs = [
+    ['idx_cards_set_id', 'CREATE INDEX IF NOT EXISTS idx_cards_set_id ON cards(set_id)'],
+    ['idx_cards_familiarity', 'CREATE INDEX IF NOT EXISTS idx_cards_familiarity ON cards(familiarity)'],
+    ['idx_sessions_token', 'CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)'],
+    ['idx_sets_user_id', 'CREATE INDEX IF NOT EXISTS idx_sets_user_id ON sets(user_id)'],
+    ['idx_sets_updated_at', 'CREATE INDEX IF NOT EXISTS idx_sets_updated_at ON sets(updated_at)'],
+  ];
+  for (const [name, sql] of indexDefs) {
+    if (!existingIndexes.includes(name)) {
+      sqliteDb.exec(sql);
+    }
+  }
 }
+
 
 async function seedAdminPostgres() {
   const adminUsername = process.env.ADMIN_USERNAME;
@@ -334,7 +362,7 @@ async function seedAdminPostgres() {
   if (adminUsername && adminPassword) {
     const { rows } = await query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [adminUsername]);
     if (rows.length === 0) {
-      const hash = hashPassword(adminPassword);
+      const hash = await hashPassword(adminPassword);
       await query(
         'INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, TRUE)',
         [adminUsername, hash]
@@ -343,36 +371,51 @@ async function seedAdminPostgres() {
     } else {
       await query('UPDATE users SET is_admin = TRUE WHERE LOWER(username) = LOWER($1)', [adminUsername]);
     }
+    // Re-hash password on every startup to handle scrypt format migration
+    const hash = await hashPassword(adminPassword);
+    await query('UPDATE users SET password_hash = $1 WHERE LOWER(username) = LOWER($2)', [hash, adminUsername]);
   }
 }
 
-function seedAdminSqlite() {
+async function seedAdminSqlite() {
   const adminUsername = process.env.ADMIN_USERNAME;
   const adminPassword = process.env.ADMIN_PASSWORD;
   if (adminUsername && adminPassword) {
     const existing = sqliteDb.prepare('SELECT id FROM users WHERE LOWER(username) = LOWER(?)').get(adminUsername);
     if (!existing) {
-      const hash = hashPassword(adminPassword);
+      const hash = await hashPassword(adminPassword);
       sqliteDb.prepare('INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, 1)').run(adminUsername, hash);
       console.log(`Admin user "${adminUsername}" created.`);
     } else {
       sqliteDb.prepare('UPDATE users SET is_admin = 1 WHERE LOWER(username) = LOWER(?)').run(adminUsername);
     }
+    // Re-hash password on every startup to handle scrypt format migration
+    const hash = await hashPassword(adminPassword);
+    sqliteDb.prepare('UPDATE users SET password_hash = ? WHERE LOWER(username) = LOWER(?)').run(hash, adminUsername);
   }
 }
 
 // ==================== PASSWORD & TOKEN ====================
 
-export function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
+export async function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(`${salt.toString('hex')}:${derivedKey.toString('hex')}`);
+    });
+  });
 }
 
-export function verifyPassword(password, stored) {
-  const [salt, hash] = stored.split(':');
-  const derivedHash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(derivedHash, 'hex'));
+export async function verifyPassword(password, stored) {
+  const [saltHex, hashHex] = stored.split(':');
+  const salt = Buffer.from(saltHex, 'hex');
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 64, (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(crypto.timingSafeEqual(Buffer.from(hashHex, 'hex'), derivedKey));
+    });
+  });
 }
 
 export function generateToken() {

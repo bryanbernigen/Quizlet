@@ -59,7 +59,6 @@ async function requireAdmin(req, res, next) {
 
 app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
-  console.log(username, password)
   if (!username || !password) {
     return res.status(400).json({ error: 'Username and password are required' });
   }
@@ -545,7 +544,7 @@ app.post('/api/import', requireAuth, async (req, res) => {
       let setId;
       if (existingSet.length > 0) {
         setId = existingSet[0].id;
-        await client.query('UPDATE sets SET updated_at = datetime("now") WHERE id = $1', [setId]);
+        await client.query('UPDATE sets SET updated_at = datetime(\'now\') WHERE id = $1', [setId]);
         setsUpdated++;
       } else {
         const { rows: newSet } = await client.query(

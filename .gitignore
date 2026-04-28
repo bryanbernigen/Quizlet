@@ -29,3 +29,6 @@ flashcards.db
 flashcards.db-shm
 flashcards.db-wal
 .env
+
+.vercel
+.env*.local

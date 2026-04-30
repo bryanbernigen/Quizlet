@@ -1,0 +1,21 @@
+/**
+ * Test setup for server-side tests.
+ * This file runs BEFORE any server modules are imported, allowing us to mock
+ * modules like 'pg' before they get loaded by db.js.
+ */
+import { vi } from 'vitest'
+
+// ─── Mock pg Pool before it gets imported ───────────────────────────────────────
+// The real db.js initializes the Postgres Pool at module load time (outside of
+// any function). By mocking it here (before db.js loads), we prevent any
+// network connection attempt. The db code will use SQLite exclusively.
+vi.mock('pg', () => ({
+  default: {
+    Pool: vi.fn().mockImplementation(() => ({
+      connect: vi.fn().mockResolvedValue({ release: vi.fn() }),
+      query: vi.fn(),
+      end: vi.fn(),
+      on: vi.fn(),
+    })),
+  },
+}))

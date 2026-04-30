@@ -1,6 +1,6 @@
 import pg from 'pg';
 import Database from 'better-sqlite3';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -10,8 +10,6 @@ const DB_TYPE = process.env.DB_TYPE || 'postgres';
 
 let pool = null;
 let sqliteDb = null;
-
-// ==================== DRIVER SETUP ====================
 
 function initPostgres() {
   const { Pool } = pg;
@@ -39,8 +37,12 @@ function queryPostgres(text, params) {
 
 function querySqlite(text, params) {
   // Convert Postgres $1, $2, ... placeholders to SQLite ? before preparing
+  // Also coerce booleans to integers (SQLite can't bind JS true/false)
+  const sqliteParams = params ? params.map(p =>
+    typeof p === 'boolean' ? (p ? 1 : 0) : p
+  ) : [];
   let sqliteText = text;
-  if (params && params.length > 0) {
+  if (sqliteParams.length > 0) {
     sqliteText = text.replace(/\$[0-9]+/g, () => '?');
   }
 
@@ -50,23 +52,32 @@ function querySqlite(text, params) {
     const returningCols = returningMatch[1].split(',').map(c => c.trim());
     sqliteText = sqliteText.replace(/RETURNING\s+.+$/i, '');
     const stmt = sqliteDb.prepare(sqliteText);
-    const info = stmt.run(...(params || []));
+    const info = stmt.run(...sqliteParams);
     const lastId = info.lastInsertRowid;
-    // For INSERT ... RETURNING id, query the inserted row
-    if (returningCols.length === 1 && returningCols[0] === 'id') {
-      const row = sqliteDb.prepare(`SELECT ${returningCols[0]} FROM ${sqliteText.match(/INTO\s+(\w+)/i)[1]} WHERE rowid = ?`).get(lastId);
-      return { rows: row ? [row] : [] };
+
+    // Extract table name from INSERT INTO <table>
+    const tableMatch = sqliteText.match(/INTO\s+(\w+)/i);
+    const tableName = tableMatch ? tableMatch[1] : null;
+
+    if (tableName) {
+      // SELECT the specific returning columns for the just-inserted row.
+      // For single-column RETURNING id this is equivalent to the rowid approach.
+      const row = sqliteDb.prepare(
+        `SELECT ${returningCols.join(', ')} FROM ${tableName} WHERE rowid = ?`
+      ).get(lastId);
+      return { rows: row ? [row] : [], lastInsertRowid: lastId, changes: info.changes };
     }
+
     return { rows: [], lastInsertRowid: lastId, changes: info.changes };
   }
 
   const stmt = sqliteDb.prepare(sqliteText);
   let result;
   if (text.trim().toUpperCase().startsWith('SELECT')) {
-    const rows = stmt.all(...(params || []));
+    const rows = stmt.all(...sqliteParams);
     result = { rows };
   } else {
-    const info = stmt.run(...(params || []));
+    const info = stmt.run(...sqliteParams);
     result = { rows: [], lastInsertRowid: info.lastInsertRowid, changes: info.changes };
   }
   return result;

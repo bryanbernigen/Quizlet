@@ -18,10 +18,13 @@ app.use(express.json({ limit: '50mb' }));
 // Note: response compression is handled automatically by Vercel CDN (gzip/brotli)
 
 // Initialize DB once on startup (runs in background, doesn't block requests)
-initDb().catch((err) => {
-  console.error('Failed to initialize database:', err);
-  process.exit(1);
-});
+// Skip initialization in test environment — tests control DB lifecycle directly.
+if (process.env.NODE_ENV !== 'test') {
+  initDb().catch((err) => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
+  });
+}
 
 // ==================== AUTH MIDDLEWARE ====================
 
@@ -121,16 +124,17 @@ app.post('/api/admin/users', requireAuth, requireAdmin, async (req, res) => {
 
   const hash = await hashPassword(password);
   const { rows } = await query(
-    'INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, username, is_admin, created_at',
+    'INSERT INTO users (username, password_hash, is_admin) VALUES ($1, $2, $3) RETURNING id, username, is_admin',
     [username, hash, is_admin]
   );
-  res.json({ user: rows[0] });
+  const { rows: [user] } = await query('SELECT id, username, is_admin, created_at FROM users WHERE id = $1', [rows[0].id]);
+  res.status(201).json({ user });
 });
 
 app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) => {
   const targetId = parseInt(req.params.id, 10);
   if (targetId === req.userId) {
-    return res.status(400).json({ error: 'Cannot delete your own account' });
+    return res.status(403).json({ error: 'Cannot delete your own account' });
   }
   await query('DELETE FROM users WHERE id = $1', [targetId]);
   res.json({ message: 'User deleted' });
@@ -187,7 +191,7 @@ app.post('/api/sets', requireAuth, async (req, res) => {
       );
     }
     await client.query('COMMIT');
-    res.json({ id: setId, message: 'Set created successfully' });
+    res.status(201).json({ id: setId, message: 'Set created successfully' });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -196,8 +200,39 @@ app.post('/api/sets', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/sets/:id', requireAuth, async (req, res) => {
+  const { rows: existing } = await query(
+    'SELECT id FROM sets WHERE id = $1',
+    [req.params.id]
+  );
+  if (existing.length === 0) {
+    return res.status(404).json({ error: 'Set not found' });
+  }
+  if (existing.length > 0) {
+    const { rows: ownerRows } = await query(
+      'SELECT id FROM sets WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (ownerRows.length === 0) {
+      return res.status(404).json({ error: 'Set not found' });
+    }
+  }
+  const { rows } = await query(
+    `SELECT s.*, ${int('COUNT(c.id)')} AS card_count FROM sets s LEFT JOIN cards c ON c.set_id = s.id WHERE s.id = $1 GROUP BY s.id`,
+    [req.params.id]
+  );
+  res.json(rows[0]);
+});
+
 app.delete('/api/sets/:id', requireAuth, async (req, res) => {
-  await query('DELETE FROM sets WHERE id = $1 AND user_id = $2', [req.params.id, req.userId]);
+  const { rows: existing } = await query(
+    'SELECT id FROM sets WHERE id = $1 AND user_id = $2',
+    [req.params.id, req.userId]
+  );
+  if (existing.length === 0) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  await query('DELETE FROM sets WHERE id = $1', [req.params.id]);
   res.json({ message: 'Set deleted' });
 });
 
@@ -208,11 +243,20 @@ app.put('/api/sets/:id', requireAuth, async (req, res) => {
   }
 
   const { rows: existing } = await query(
-    'SELECT id FROM sets WHERE id = $1 AND user_id = $2',
-    [req.params.id, req.userId]
+    'SELECT id FROM sets WHERE id = $1',
+    [req.params.id]
   );
   if (existing.length === 0) {
     return res.status(404).json({ error: 'Set not found' });
+  }
+  if (existing.length > 0) {
+    const { rows: ownerRows } = await query(
+      'SELECT id FROM sets WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.userId]
+    );
+    if (ownerRows.length === 0) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
   }
 
   const client = await getClient();
@@ -351,7 +395,7 @@ app.post('/api/shared/:shareToken/copy', requireAuth, async (req, res) => {
     );
 
     if (sourceCards.length > 0) {
-      const placeholders = sourceCards.map((_, i) => `(${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ');
+      const placeholders = sourceCards.map((_, i) => `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ');
       const flatParams = sourceCards.flatMap(c => [newSetId, c.front, c.back]);
       await client.query(
         `INSERT INTO cards (set_id, front, back) VALUES ${placeholders}`,
@@ -365,7 +409,7 @@ app.post('/api/shared/:shareToken/copy', requireAuth, async (req, res) => {
     );
 
     await client.query('COMMIT');
-    res.json({ newSetId });
+    res.status(201).json({ newSetId });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
@@ -383,6 +427,12 @@ app.get('/api/cards/browse', requireAuth, async (req, res) => {
   const offset = (pageNum - 1) * pageLimit;
   const params = [req.userId];
   let filterClause = '';
+
+  // If a familiarity filter is provided but is not valid, return empty results.
+  // This prevents loose SQLite type coercion from returning unintended results.
+  if (familiarity !== undefined && !['familiar', 'neutral', 'unfamiliar'].includes(familiarity)) {
+    return res.json({ data: [], pagination: { page: pageNum, limit: pageLimit, total: 0, totalPages: 0 } });
+  }
 
   if (familiarity && ['familiar', 'neutral', 'unfamiliar'].includes(familiarity)) {
     params.push(familiarity);
@@ -576,46 +626,42 @@ app.post('/api/cards/:id/quiz-result', requireAuth, async (req, res) => {
 // ==================== STATS ====================
 
 app.get('/api/stats', requireAuth, async (req, res) => {
-  const { rows } = await query(`
-    WITH summary AS (
-      SELECT
-        ${int('COUNT(DISTINCT s.id)')} AS total_sets,
-        ${int('COUNT(c.id)')} AS total_cards,
-        COALESCE(SUM(CASE WHEN c.familiarity = 'familiar' THEN 1 ELSE 0 END), 0) AS familiar_count,
-        COALESCE(SUM(CASE WHEN c.familiarity = 'neutral' THEN 1 ELSE 0 END), 0) AS neutral_count,
-        COALESCE(SUM(CASE WHEN c.familiarity = 'unfamiliar' OR c.familiarity IS NULL THEN 1 ELSE 0 END), 0) AS unfamiliar_count
-      FROM sets s
-      LEFT JOIN cards c ON c.set_id = s.id
-      WHERE s.user_id = $1
-    ),
-    trouble AS (
-      SELECT c.front, c.back, c.incorrect_count, c.correct_count,
-        CASE
-          WHEN c.correct_count = 0 AND c.incorrect_count > 0 THEN c.incorrect_count * 100
-          WHEN c.correct_count = 0 THEN 0
-          ELSE ${float('c.incorrect_count')} / c.correct_count
-        END AS trouble_score
-      FROM cards c JOIN sets s ON s.id = c.set_id
-      WHERE s.user_id = $1 AND c.incorrect_count > 0
-      ORDER BY trouble_score DESC
-      LIMIT 5
-    )
-    SELECT s.total_sets, s.total_cards, s.familiar_count, s.neutral_count, s.unfamiliar_count,
-           COALESCE(json_agg(t.* ORDER BY t.trouble_score DESC) FILTER (WHERE t.* IS NOT NULL), '[]') AS trouble_words
-    FROM summary s, LATERAL (SELECT * FROM trouble t) t
-    GROUP BY s.total_sets, s.total_cards, s.familiar_count, s.neutral_count, s.unfamiliar_count
+  const summaryRows = await query(`
+    SELECT
+      ${int('COUNT(DISTINCT s.id)')} AS total_sets,
+      ${int('COUNT(c.id)')} AS total_cards,
+      COALESCE(SUM(CASE WHEN c.familiarity = 'familiar' THEN 1 ELSE 0 END), 0) AS familiar_count,
+      COALESCE(SUM(CASE WHEN c.familiarity = 'neutral' THEN 1 ELSE 0 END), 0) AS neutral_count,
+      COALESCE(SUM(CASE WHEN c.familiarity = 'unfamiliar' OR c.familiarity IS NULL THEN 1 ELSE 0 END), 0) AS unfamiliar_count
+    FROM sets s
+    LEFT JOIN cards c ON c.set_id = s.id
+    WHERE s.user_id = $1
   `, [req.userId]);
 
-  if (rows.length === 0) {
-    return res.json({ totalCards: 0, totalSets: 0, familiarity: { familiar: 0, neutral: 0, unfamiliar: 0 }, troubleWords: [] });
-  }
+  const summary = summaryRows.rows[0] || { total_sets: 0, total_cards: 0, familiar_count: 0, neutral_count: 0, unfamiliar_count: 0 };
 
-  const row = rows[0];
+  const troubleRows = await query(`
+    SELECT c.front, c.back, c.incorrect_count, c.correct_count,
+      CASE
+        WHEN c.correct_count = 0 AND c.incorrect_count > 0 THEN c.incorrect_count * 100
+        WHEN c.correct_count = 0 THEN 0
+        ELSE ${float('c.incorrect_count')} / c.correct_count
+      END AS trouble_score
+    FROM cards c JOIN sets s ON s.id = c.set_id
+    WHERE s.user_id = $1 AND c.incorrect_count > 0
+    ORDER BY trouble_score DESC
+    LIMIT 5
+  `, [req.userId]);
+
   res.json({
-    totalCards: row.total_cards,
-    totalSets: row.total_sets,
-    familiarity: { familiar: Number(row.familiar_count), neutral: Number(row.neutral_count), unfamiliar: Number(row.unfamiliar_count) },
-    troubleWords: row.trouble_words || [],
+    totalCards: Number(summary.total_cards),
+    totalSets: Number(summary.total_sets),
+    familiarity: {
+      familiar: Number(summary.familiar_count),
+      neutral: Number(summary.neutral_count),
+      unfamiliar: Number(summary.unfamiliar_count),
+    },
+    troubleWords: troubleRows.rows.map(r => ({ front: r.front, back: r.back, incorrect_count: r.incorrect_count, correct_count: r.correct_count })),
   });
 });
 
@@ -673,22 +719,24 @@ app.post('/api/import', requireAuth, async (req, res) => {
   const nowVal = now();
 
   for (const setData of validSets) {
-    const createdAt = setData.created_at || new Date().toISOString();
     if (setMap.has(setData.name)) {
-      const setId = setMap.get(setData.name);
-      setMap.set(setData.name, { id: setId, isUpdate: true });
+      const setId = typeof setMap.get(setData.name) === 'number' ? setMap.get(setData.name) : setMap.get(setData.name).id;
       await query(`UPDATE sets SET updated_at = ${nowVal} WHERE id = $1`, [setId]);
+      setMap.set(setData.name, { id: setId, isUpdate: true });
     } else {
-      const { rows } = await query(
-        'INSERT INTO sets (name, user_id, created_at, updated_at) VALUES ($1, $2, $3, $3) RETURNING id',
-        [setData.name, req.userId, createdAt]
+      const insResult = await query(
+        `INSERT INTO sets (name, user_id, created_at, updated_at) VALUES ($1, $2, ${nowVal}, ${nowVal}) RETURNING id`,
+        [setData.name, req.userId]
       );
-      setMap.set(setData.name, { id: rows[0].id, isUpdate: false });
+      const newId = insResult.lastInsertRowid;
+      // For SQLite, fetch the actual id from the inserted row
+      const { rows: [{ id: fetchedId }] } = await query('SELECT id FROM sets WHERE rowid = $1', [newId]);
+      setMap.set(setData.name, { id: fetchedId, isUpdate: false });
       newSets.push(setData.name);
     }
   }
 
-  const setIds = [...setMap.values()].map(v => (typeof v === 'number' ? v : v.id));
+  const setIds = [...setMap.values()].map(v => v.id);
   const idPlaceholders = setIds.map((_, i) => `$${i + 1}`).join(', ');
   const { rows: existingCards } = await query(
     `SELECT id, set_id, front, back, correct_count, incorrect_count FROM cards WHERE set_id IN (${idPlaceholders})`,

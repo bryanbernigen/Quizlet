@@ -8,18 +8,29 @@
     "dev:client": "vite",
     "dev:server": "node --env-file=.env server/index.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "better-sqlite3": "^11.9.1",
     "concurrently": "^9.2.1",
+    "happy-dom": "^20.9.0",
+    "jsdom": "^29.1.0",
+    "supertest": "^7.2.2",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.9.3",
-    "vite": "^8.0.1"
+    "vite": "^8.0.1",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
     "cors": "^2.8.6",

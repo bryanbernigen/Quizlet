@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
 import { query, getClient, initDb, hashPassword, verifyPassword, generateToken } from './db.js';
@@ -153,7 +154,13 @@ app.get('/api/sets', requireAuth, async (req, res) => {
     GROUP BY s.id
     ORDER BY s.updated_at DESC, s.created_at DESC
   `, [req.userId]);
-  res.json(rows);
+  res.json(rows.map(s => ({
+    ...s,
+    is_shared: !!s.is_shared,
+    share_token: s.share_token || null,
+    copied_count: s.copied_count || 0,
+    original_set_id: s.original_set_id || null,
+  })));
 });
 
 app.post('/api/sets', requireAuth, async (req, res) => {
@@ -268,6 +275,103 @@ app.get('/api/sets/:id/cards', requireAuth, async (req, res) => {
 
   const { rows } = await query('SELECT * FROM cards WHERE set_id = $1', [req.params.id]);
   res.json(rows);
+});
+
+// ==================== SHARING ====================
+
+// Toggle sharing for a set (owner only)
+app.post('/api/sets/:id/share', requireAuth, async (req, res) => {
+  const { enabled } = req.body;
+  const { rows: existing } = await query(
+    'SELECT id, share_token, is_shared FROM sets WHERE id = $1 AND user_id = $2',
+    [req.params.id, req.userId]
+  );
+  if (existing.length === 0) return res.status(404).json({ error: 'Set not found' });
+
+  const set = existing[0];
+  if (enabled) {
+    const token = set.share_token || crypto.randomBytes(16).toString('hex');
+    await query(
+      'UPDATE sets SET share_token = $1, is_shared = TRUE WHERE id = $2',
+      [token, req.params.id]
+    );
+    res.json({ shareUrl: `/shared/${token}`, shareToken: token });
+  } else {
+    await query(
+      'UPDATE sets SET share_token = NULL, is_shared = FALSE WHERE id = $1',
+      [req.params.id]
+    );
+    res.json({ shareUrl: null, shareToken: null });
+  }
+});
+
+// View a shared set (anonymous access)
+app.get('/api/shared/:shareToken', async (req, res) => {
+  const { rows: setRows } = await query(
+    'SELECT id, name, user_id, copied_count, created_at FROM sets WHERE share_token = $1 AND is_shared = TRUE',
+    [req.params.shareToken]
+  );
+  if (setRows.length === 0) return res.status(404).json({ error: 'Set not found or sharing has been revoked' });
+
+  const set = setRows[0];
+  const { rows: cards } = await query(
+    'SELECT id, front, back FROM cards WHERE set_id = $1',
+    [set.id]
+  );
+
+  res.json({
+    set: { id: set.id, name: set.name, card_count: cards.length, created_at: set.created_at },
+    cards,
+  });
+});
+
+// Copy a shared set to the current user's account
+app.post('/api/shared/:shareToken/copy', requireAuth, async (req, res) => {
+  const { rows: sourceSet } = await query(
+    'SELECT id, name, is_shared FROM sets WHERE share_token = $1 AND is_shared = TRUE',
+    [req.params.shareToken]
+  );
+  if (sourceSet.length === 0) return res.status(404).json({ error: 'Set not found or sharing has been revoked' });
+
+  const source = sourceSet[0];
+
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      'INSERT INTO sets (name, user_id, original_set_id) VALUES ($1, $2, $3) RETURNING id',
+      [source.name, req.userId, source.id]
+    );
+    const newSetId = rows[0].id;
+
+    const { rows: sourceCards } = await client.query(
+      'SELECT front, back FROM cards WHERE set_id = $1',
+      [source.id]
+    );
+
+    if (sourceCards.length > 0) {
+      const placeholders = sourceCards.map((_, i) => `(${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`).join(', ');
+      const flatParams = sourceCards.flatMap(c => [newSetId, c.front, c.back]);
+      await client.query(
+        `INSERT INTO cards (set_id, front, back) VALUES ${placeholders}`,
+        flatParams
+      );
+    }
+
+    await client.query(
+      'UPDATE sets SET copied_count = copied_count + 1 WHERE id = $1',
+      [source.id]
+    );
+
+    await client.query('COMMIT');
+    res.json({ newSetId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
 });
 
 // ==================== WORD BROWSER ====================

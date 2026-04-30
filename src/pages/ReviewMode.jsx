@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
+import { useSearchParams, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import SetFilter, { useSetFilter } from '../components/SetFilter'
 import CardFilters, { useCardFilters } from '../components/CardFilters'
 import { KoreanFlag, IndonesianFlag } from '../components/Flag'
 import { useApiFetch } from '../context/AuthContext'
+import { useAuth } from '../context/AuthContext'
 
 const pageVariants = {
   initial: { opacity: 0, y: 20 },
@@ -12,6 +14,8 @@ const pageVariants = {
 }
 
 export default function ReviewMode() {
+  const [searchParams] = useSearchParams()
+  const sharedSetToken = searchParams.get('sharedSet')
   const [sets, setSets] = useState([])
   const [selectedSets, setSelectedSets] = useState([])
   const [cardCount, setCardCount] = useState(10)
@@ -26,10 +30,13 @@ export default function ReviewMode() {
   const [showCard, setShowCard] = useState(true)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
+  const [sharedSetInfo, setSharedSetInfo] = useState(null)
   const swipingRef = useRef(false)
   const [frontLang, setFrontLang] = useState('indonesian') // 'korean' or 'indonesian'
   const { familiarityFilter, attemptFilter, toggleFamiliarity, toggleAttempt, buildQueryParams } = useCardFilters()
   const apiFetch = useApiFetch()
+  const { user } = useAuth()
+  const isShared = !!sharedSetToken
 
   // Helper to get the displayed front/back based on frontLang
   const getFront = (c) => frontLang === 'korean' ? c.front : c.back
@@ -42,7 +49,16 @@ export default function ReviewMode() {
     : <><KoreanFlag /> Korean</>
 
   useEffect(() => {
-    apiFetch('/api/sets').then(r => r.json()).then(setSets)
+    if (!isShared) {
+      apiFetch('/api/sets').then(r => r.json()).then(allSets => {
+        setSets(allSets)
+        const setIdsParam = searchParams.get('setIds')
+        if (setIdsParam) {
+          const ids = setIdsParam.split(',').map(Number).filter(Boolean)
+          setSelectedSets(ids)
+        }
+      })
+    }
   }, [])
 
   const { search, setSearch, sortBy, setSortBy, filteredSets } = useSetFilter(sets)
@@ -54,16 +70,25 @@ export default function ReviewMode() {
   }
 
   const startReview = async () => {
-    if (selectedSets.length === 0) return
+    if (!isShared && selectedSets.length === 0) return
     setLoading(true)
     setLoadError('')
     try {
-      const filterParams = buildQueryParams()
-      const url = `/api/cards/review?setIds=${selectedSets.join(',')}&count=${cardCount}${filterParams ? '&' + filterParams : ''}`
-      const res = await apiFetch(url)
-      const data = await res.json()
+      let data
+      if (isShared) {
+        const res = await fetch(`/api/shared/${sharedSetToken}`)
+        if (!res.ok) throw new Error('Shared set not found')
+        const d = await res.json()
+        setSharedSetInfo(d.set)
+        data = d.cards
+      } else {
+        const filterParams = buildQueryParams()
+        const url = `/api/cards/review?setIds=${selectedSets.join(',')}&count=${cardCount}${filterParams ? '&' + filterParams : ''}`
+        const res = await apiFetch(url)
+        data = await res.json()
+      }
       if (data.length === 0) {
-        setLoadError('No cards match your selected filters. Try adjusting your filter settings.')
+        setLoadError('No cards match your selected filters.')
         setLoading(false)
         return
       }
@@ -77,7 +102,7 @@ export default function ReviewMode() {
       swipingRef.current = false
       setResults({ familiar: 0, neutral: 0, unfamiliar: 0 })
     } catch (e) {
-      setLoadError('Failed to load cards. Please try again.')
+      setLoadError(e.message || 'Failed to load cards.')
     } finally {
       setLoading(false)
     }
@@ -86,13 +111,15 @@ export default function ReviewMode() {
   const advanceCard = (familiarity) => {
     setResults(prev => ({ ...prev, [familiarity]: prev[familiarity] + 1 }))
 
-    // Post familiarity update
-    const card = cards[currentIndex]
-    apiFetch(`/api/cards/${card.id}/familiarity`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ familiarity }),
-    })
+    // Post familiarity update (only for authenticated users)
+    if (user) {
+      const card = cards[currentIndex]
+      apiFetch(`/api/cards/${card.id}/familiarity`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ familiarity }),
+      })
+    }
 
     if (currentIndex + 1 >= cards.length) {
       setCompleted(true)
@@ -143,194 +170,244 @@ export default function ReviewMode() {
         <h1 style={{ fontSize: '2rem', fontWeight: 800, marginBottom: 8 }}>
           <span className="gradient-text">Review Mode</span>
         </h1>
-        <p style={{ color: 'var(--text-secondary)', marginBottom: 32 }}>Swipe cards to rate your familiarity</p>
+        <p style={{ color: 'var(--text-secondary)', marginBottom: 32 }}>
+          {isShared ? 'Reviewing shared set' : 'Swipe cards to rate your familiarity'}
+        </p>
 
-        <div style={{ marginBottom: 24 }}>
-          <label className="form-label">Select Sets</label>
-          {sets.length === 0 ? (
-            <p style={{ color: 'var(--text-secondary)' }}>No sets found. Create one first!</p>
-          ) : (
-            <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-                <SetFilter
-                  search={search} onSearchChange={setSearch}
-                  sortBy={sortBy} onSortChange={setSortBy}
-                  totalCount={sets.length} filteredCount={filteredSets.length}
-                />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {isShared ? (
+          // Shared set: simplified setup
+          <div style={{ maxWidth: 500 }}>
+            {loadError && (
+              <div style={{ marginBottom: 16, padding: '10px 16px', borderRadius: 10, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600 }}>
+                {loadError}
+              </div>
+            )}
+            <div style={{ marginBottom: 24 }}>
+              <label className="form-label">Show First</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <motion.button
+                  type="button"
+                  onClick={() => setFrontLang('indonesian')}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  style={{
+                    flex: 1, padding: '10px 8px', borderRadius: 12,
+                    background: frontLang === 'indonesian' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
+                    color: frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                    fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', fontFamily: 'inherit',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  <IndonesianFlag size={18} /> Indonesian
+                </motion.button>
+                <motion.button
+                  type="button"
+                  onClick={() => setFrontLang('korean')}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  style={{
+                    flex: 1, padding: '10px 8px', borderRadius: 12,
+                    background: frontLang === 'korean' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
+                    color: frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                    fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', fontFamily: 'inherit',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  }}
+                >
+                  <KoreanFlag size={18} /> Korean
+                </motion.button>
+              </div>
+            </div>
+            {!user && (
+              <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 10, background: 'rgba(139, 92, 246, 0.08)', border: '1px solid rgba(139, 92, 246, 0.2)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                <Link to="/login" style={{ color: 'var(--accent-purple)', fontWeight: 700 }}>Log in</Link> to save your progress
+              </div>
+            )}
+            <motion.button
+              className="btn-primary"
+              onClick={startReview}
+              disabled={loading}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              style={{ fontSize: '1rem', padding: '14px 36px', opacity: loading ? 0.5 : 1 }}
+            >
+              {loading ? '⏳ Loading...' : '🚀 Start Review'}
+            </motion.button>
+          </div>
+        ) : (
+          // Normal: set selection
+          <>
+            <div style={{ marginBottom: 24 }}>
+              <label className="form-label">Select Sets</label>
+              {sets.length === 0 ? (
+                <p style={{ color: 'var(--text-secondary)' }}>No sets found. Create one first!</p>
+              ) : (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                    <SetFilter
+                      search={search} onSearchChange={setSearch}
+                      sortBy={sortBy} onSortChange={setSortBy}
+                      totalCount={sets.length} filteredCount={filteredSets.length}
+                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <motion.button
+                        type="button"
+                        onClick={() => {
+                          const allSelected = filteredSets.every(s => selectedSets.includes(s.id))
+                          if (allSelected) {
+                            setSelectedSets(prev => prev.filter(id => !filteredSets.some(f => f.id === id)))
+                          } else {
+                            setSelectedSets(prev => [...new Set([...prev, ...filteredSets.map(s => s.id)])])
+                          }
+                        }}
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
+                        style={{
+                          padding: '6px 14px', borderRadius: 8,
+                          background: 'rgba(139, 92, 246, 0.12)',
+                          border: '1px solid rgba(139, 92, 246, 0.35)',
+                          color: 'var(--accent-purple)',
+                          fontSize: '0.78rem', fontWeight: 700,
+                          cursor: 'pointer', fontFamily: 'inherit',
+                        }}
+                      >
+                        {filteredSets.every(s => selectedSets.includes(s.id)) ? 'Deselect All' : 'Select All'}
+                      </motion.button>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                        {selectedSets.length} selected
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+                    {filteredSets.map(s => (
+                      <label key={s.id} className="set-checkbox" style={selectedSets.includes(s.id) ? { background: 'rgba(139, 92, 246, 0.12)', borderColor: 'rgba(139, 92, 246, 0.4)' } : {}}>
+                        <input
+                          type="checkbox"
+                          checked={selectedSets.includes(s.id)}
+                          onChange={() => toggleSet(s.id)}
+                        />
+                        <div>
+                          <span style={{ fontWeight: 600 }}>{s.name}</span>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginLeft: 8 }}>({s.card_count} cards)</span>
+                          {s.card_count > 0 && (
+                            <div style={{ display: 'flex', gap: 8, marginTop: 3, fontSize: '0.7rem' }}>
+                              <span style={{ color: 'var(--accent-green)' }}>●{s.familiar_count}</span>
+                              <span style={{ color: 'var(--accent-amber)' }}>●{s.neutral_count}</span>
+                              <span style={{ color: 'var(--accent-red)' }}>●{s.unfamiliar_count}</span>
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <CardFilters
+              familiarityFilter={familiarityFilter}
+              attemptFilter={attemptFilter}
+              onToggleFamiliarity={toggleFamiliarity}
+              onToggleAttempt={toggleAttempt}
+            />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 32, maxWidth: 420 }}>
+              <div>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  Number of Cards
+                  {selectedSets.length > 0 && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      {totalAvailableCards} available
+                    </span>
+                  )}
+                </label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="number"
+                    className="form-input"
+                    style={{ flex: 1 }}
+                    value={cardCount}
+                    onChange={e => setCardCount(Math.max(1, parseInt(e.target.value) || 1))}
+                    min={1}
+                  />
                   <motion.button
                     type="button"
-                    onClick={() => {
-                      const allSelected = filteredSets.every(s => selectedSets.includes(s.id))
-                      if (allSelected) {
-                        setSelectedSets(prev => prev.filter(id => !filteredSets.some(f => f.id === id)))
-                      } else {
-                        setSelectedSets(prev => [...new Set([...prev, ...filteredSets.map(s => s.id)])])
-                      }
+                    onClick={() => setCardCount(totalAvailableCards)}
+                    disabled={selectedSets.length === 0}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    style={{
+                      padding: '0 14px', borderRadius: 12,
+                      background: 'rgba(139, 92, 246, 0.1)',
+                      border: '1px solid var(--border-glass)',
+                      color: 'var(--accent-purple)',
+                      fontSize: '0.8rem', fontWeight: 700,
+                      cursor: 'pointer', opacity: selectedSets.length === 0 ? 0.5 : 1,
+                      fontFamily: 'inherit',
                     }}
+                  >
+                    ALL
+                  </motion.button>
+                </div>
+              </div>
+              <div>
+                <label className="form-label">Show First</label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <motion.button
+                    type="button"
+                    onClick={() => setFrontLang('indonesian')}
                     whileHover={{ scale: 1.03 }}
                     whileTap={{ scale: 0.97 }}
                     style={{
-                      padding: '6px 14px', borderRadius: 8,
-                      background: 'rgba(139, 92, 246, 0.12)',
-                      border: '1px solid rgba(139, 92, 246, 0.35)',
-                      color: 'var(--accent-purple)',
-                      fontSize: '0.78rem', fontWeight: 700,
-                      cursor: 'pointer', fontFamily: 'inherit',
+                      flex: 1, padding: '10px 8px', borderRadius: 12,
+                      background: frontLang === 'indonesian' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
+                      color: frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                      fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', fontFamily: 'inherit',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                     }}
                   >
-                    {filteredSets.every(s => selectedSets.includes(s.id)) ? 'Deselect All' : 'Select All'}
+                    <IndonesianFlag size={18} /> Indonesian
                   </motion.button>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                    {selectedSets.length} selected
-                  </span>
+                  <motion.button
+                    type="button"
+                    onClick={() => setFrontLang('korean')}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    style={{
+                      flex: 1, padding: '10px 8px', borderRadius: 12,
+                      background: frontLang === 'korean' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
+                      color: frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--text-secondary)',
+                      fontWeight: 600, fontSize: '0.9rem', cursor: 'pointer', fontFamily: 'inherit',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    }}
+                  >
+                    <KoreanFlag size={18} /> Korean
+                  </motion.button>
                 </div>
               </div>
-              <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
-                {filteredSets.map(s => (
-                  <label key={s.id} className="set-checkbox" style={selectedSets.includes(s.id) ? { background: 'rgba(139, 92, 246, 0.12)', borderColor: 'rgba(139, 92, 246, 0.4)' } : {}}>
-                    <input
-                      type="checkbox"
-                      checked={selectedSets.includes(s.id)}
-                      onChange={() => toggleSet(s.id)}
-                    />
-                    <div>
-                      <span style={{ fontWeight: 600 }}>{s.name}</span>
-                      <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginLeft: 8 }}>({s.card_count} cards)</span>
-                      {s.card_count > 0 && (
-                        <div style={{ display: 'flex', gap: 8, marginTop: 3, fontSize: '0.7rem' }}>
-                          <span style={{ color: 'var(--accent-green)' }}>●{s.familiar_count}</span>
-                          <span style={{ color: 'var(--accent-amber)' }}>●{s.neutral_count}</span>
-                          <span style={{ color: 'var(--accent-red)' }}>●{s.unfamiliar_count}</span>
-                        </div>
-                      )}
-                    </div>
-                  </label>
-                ))}
+            </div>
+
+            {loadError && (
+              <div style={{ marginBottom: 16, padding: '10px 16px', borderRadius: 10, background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)', color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600 }}>
+                {loadError}
               </div>
-            </>
-          )}
-        </div>
+            )}
 
-        {/* Card Filters */}
-        <CardFilters
-          familiarityFilter={familiarityFilter}
-          attemptFilter={attemptFilter}
-          onToggleFamiliarity={toggleFamiliarity}
-          onToggleAttempt={toggleAttempt}
-        />
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 32, maxWidth: 420 }}>
-          <div>
-            <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              Number of Cards
-              {selectedSets.length > 0 && (
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  {totalAvailableCards} available
-                </span>
-              )}
-            </label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <input
-                type="number"
-                className="form-input"
-                style={{ flex: 1 }}
-                value={cardCount}
-                onChange={e => setCardCount(Math.max(1, parseInt(e.target.value) || 1))}
-                min={1}
-              />
-              <motion.button
-                type="button"
-                onClick={() => setCardCount(totalAvailableCards)}
-                disabled={selectedSets.length === 0}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                style={{
-                  padding: '0 14px',
-                  borderRadius: 12,
-                  background: 'rgba(139, 92, 246, 0.1)',
-                  border: '1px solid var(--border-glass)',
-                  color: 'var(--accent-purple)',
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  opacity: selectedSets.length === 0 ? 0.5 : 1,
-                  fontFamily: 'inherit',
-                }}
-              >
-                ALL
-              </motion.button>
-            </div>
-          </div>
-          <div>
-            <label className="form-label">Show First</label>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <motion.button
-                type="button"
-                onClick={() => setFrontLang('indonesian')}
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                style={{
-                  flex: 1, padding: '10px 8px',
-                  borderRadius: 12,
-                  background: frontLang === 'indonesian' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
-                  color: frontLang === 'indonesian' ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                  fontWeight: 600, fontSize: '0.9rem',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  transition: 'all 0.2s',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                }}
-              >
-                <IndonesianFlag size={18} /> Indonesian
-              </motion.button>
-              <motion.button
-                type="button"
-                onClick={() => setFrontLang('korean')}
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                style={{
-                  flex: 1, padding: '10px 8px',
-                  borderRadius: 12,
-                  background: frontLang === 'korean' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--border-glass)'}`,
-                  color: frontLang === 'korean' ? 'var(--accent-purple)' : 'var(--text-secondary)',
-                  fontWeight: 600, fontSize: '0.9rem',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                  transition: 'all 0.2s',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                }}
-              >
-                <KoreanFlag size={18} /> Korean
-              </motion.button>
-            </div>
-          </div>
-        </div>
-
-        {loadError && (
-          <div style={{
-            marginBottom: 16, padding: '10px 16px', borderRadius: 10,
-            background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)',
-            color: 'var(--accent-red)', fontSize: '0.9rem', fontWeight: 600,
-          }}>
-            {loadError}
-          </div>
+            <motion.button
+              className="btn-primary"
+              onClick={startReview}
+              disabled={selectedSets.length === 0 || loading}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              style={{ opacity: (selectedSets.length === 0 || loading) ? 0.5 : 1, fontSize: '1rem', padding: '14px 36px' }}
+            >
+              {loading ? '⏳ Loading...' : '🚀 Start Review'}
+            </motion.button>
+          </>
         )}
-
-        <motion.button
-          className="btn-primary"
-          onClick={startReview}
-          disabled={selectedSets.length === 0 || loading}
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          style={{
-            opacity: (selectedSets.length === 0 || loading) ? 0.5 : 1,
-            fontSize: '1rem',
-            padding: '14px 36px',
-          }}
-        >
-          {loading ? '⏳ Loading...' : '🚀 Start Review'}
-        </motion.button>
       </motion.div>
     )
   }
@@ -367,13 +444,41 @@ export default function ReviewMode() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
-          <motion.button className="btn-primary" onClick={startReview} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-            🔄 Review Again
-          </motion.button>
-          <motion.button className="btn-secondary" onClick={() => { setStarted(false); setCompleted(false) }} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-            ← Back to Setup
-          </motion.button>
+        <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+          {isShared ? (
+            <>
+              <motion.button className="btn-primary" onClick={() => { setStarted(false); setCompleted(false) }} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                ← Back
+              </motion.button>
+              <a href={`/shared/${sharedSetToken}`} style={{ textDecoration: 'none' }}>
+                <motion.button className="btn-secondary" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  🔗 View Set
+                </motion.button>
+              </a>
+              {user ? (
+                <a href="/manage" style={{ textDecoration: 'none' }}>
+                  <motion.button className="btn-secondary" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    💾 My Sets
+                  </motion.button>
+                </a>
+              ) : (
+                <a href="/login" style={{ textDecoration: 'none' }}>
+                  <motion.button className="btn-secondary" whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                    Log in to save
+                  </motion.button>
+                </a>
+              )}
+            </>
+          ) : (
+            <>
+              <motion.button className="btn-primary" onClick={startReview} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                🔄 Review Again
+              </motion.button>
+              <motion.button className="btn-secondary" onClick={() => { setStarted(false); setCompleted(false) }} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                ← Back to Setup
+              </motion.button>
+            </>
+          )}
         </div>
       </motion.div>
     )

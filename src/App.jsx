@@ -1,4 +1,4 @@
-import { Routes, Route, NavLink } from 'react-router-dom'
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { lazy, Suspense } from 'react'
@@ -7,6 +7,7 @@ import { KoreanFlag, IndonesianFlag } from './components/Flag'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const ManageSets = lazy(() => import('./pages/ManageSets'))
+const SharedSet = lazy(() => import('./pages/SharedSet'))
 const ReviewMode = lazy(() => import('./pages/ReviewMode'))
 const SpellingQuiz = lazy(() => import('./pages/SpellingQuiz'))
 const EditSet = lazy(() => import('./pages/EditSet'))
@@ -29,6 +30,8 @@ function PageLoader() {
 
 function AppContent() {
   const { user, loading } = useAuth()
+  const location = useLocation()
+  const isSharedRoute = location.pathname.startsWith('/shared/')
 
   if (loading) {
     return (
@@ -44,7 +47,7 @@ function AppContent() {
     )
   }
 
-  if (!user) {
+  if (!user && !isSharedRoute) {
     return <LoginPage />
   }
 
@@ -54,26 +57,34 @@ function AppContent() {
         <NavLink to="/" className="nav-logo" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <KoreanFlag size={20} /> KoreaQuiz <IndonesianFlag size={20} />
         </NavLink>
-        <div className="nav-links">
-          <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            Dashboard
-          </NavLink>
-          <NavLink to="/manage" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            Manage Sets
-          </NavLink>
-          <NavLink to="/review" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            Review
-          </NavLink>
-          <NavLink to="/quiz" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            Quiz
-          </NavLink>
-          <NavLink to="/words" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            Words
-          </NavLink>
-          <NavLink to="/profile" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
-            👤 {user.username}
-          </NavLink>
-        </div>
+        {user ? (
+          <div className="nav-links">
+            <NavLink to="/" end className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Dashboard
+            </NavLink>
+            <NavLink to="/manage" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Manage Sets
+            </NavLink>
+            <NavLink to="/review" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Review
+            </NavLink>
+            <NavLink to="/quiz" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Quiz
+            </NavLink>
+            <NavLink to="/words" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Words
+            </NavLink>
+            <NavLink to="/profile" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              👤 {user.username}
+            </NavLink>
+          </div>
+        ) : (
+          <div className="nav-links">
+            <NavLink to="/login" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+              Log in
+            </NavLink>
+          </div>
+        )}
       </nav>
 
       <div style={{ flex: 1 }}>
@@ -82,6 +93,7 @@ function AppContent() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/manage" element={<ManageSets />} />
+              <Route path="/shared/:shareToken" element={<SharedSet />} />
               <Route path="/edit/:id" element={<EditSet />} />
               <Route path="/review" element={<ReviewMode />} />
               <Route path="/quiz" element={<SpellingQuiz />} />

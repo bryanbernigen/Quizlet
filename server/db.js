@@ -152,6 +152,10 @@ async function initDbPostgres() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
+      share_token TEXT UNIQUE,
+      is_shared BOOLEAN NOT NULL DEFAULT FALSE,
+      copied_count INTEGER NOT NULL DEFAULT 0,
+      original_set_id INTEGER REFERENCES sets(id),
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -200,6 +204,25 @@ async function initDbPostgres() {
     END $$
   `);
 
+  // Add sharing columns to sets table for existing deployments
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sets' AND column_name='share_token') THEN
+        ALTER TABLE sets ADD COLUMN share_token TEXT UNIQUE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sets' AND column_name='is_shared') THEN
+        ALTER TABLE sets ADD COLUMN is_shared BOOLEAN NOT NULL DEFAULT FALSE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sets' AND column_name='copied_count') THEN
+        ALTER TABLE sets ADD COLUMN copied_count INTEGER NOT NULL DEFAULT 0;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='sets' AND column_name='original_set_id') THEN
+        ALTER TABLE sets ADD COLUMN original_set_id INTEGER REFERENCES sets(id);
+      END IF;
+    END $$
+  `);
+
   // Deduplicate sets: keep the oldest (lowest id) per (name, user_id)
   await query(`
     DELETE FROM sets
@@ -241,6 +264,8 @@ async function initDbPostgres() {
     'CREATE INDEX IF NOT EXISTS idx_sessions_token_expires ON sessions(token, expires_at)',
     'CREATE INDEX IF NOT EXISTS idx_sets_user_id ON sets(user_id)',
     'CREATE INDEX IF NOT EXISTS idx_sets_updated_at ON sets(updated_at)',
+    'CREATE INDEX IF NOT EXISTS idx_sets_share_token ON sets(share_token)',
+    'CREATE INDEX IF NOT EXISTS idx_sets_original_set_id ON sets(original_set_id)',
   ]) {
     await query(sql);
   }
@@ -274,6 +299,10 @@ async function initDbSqlite() {
       id INTEGER PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
+      share_token TEXT UNIQUE,
+      is_shared INTEGER NOT NULL DEFAULT 0,
+      copied_count INTEGER NOT NULL DEFAULT 0,
+      original_set_id INTEGER REFERENCES sets(id),
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
     )
@@ -313,6 +342,21 @@ async function initDbSqlite() {
     sqliteDb.exec("UPDATE sessions SET expires_at = datetime('now', '+30 days') WHERE expires_at IS NULL");
   }
 
+  // Add sharing columns to sets table for existing deployments
+  const setCols = sqliteDb.pragma('table_info(sets)').map(c => c.name);
+  if (!setCols.includes('share_token')) {
+    sqliteDb.exec('ALTER TABLE sets ADD COLUMN share_token TEXT');
+  }
+  if (!setCols.includes('is_shared')) {
+    sqliteDb.exec('ALTER TABLE sets ADD COLUMN is_shared INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!setCols.includes('copied_count')) {
+    sqliteDb.exec('ALTER TABLE sets ADD COLUMN copied_count INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!setCols.includes('original_set_id')) {
+    sqliteDb.exec('ALTER TABLE sets ADD COLUMN original_set_id INTEGER');
+  }
+
   // Deduplicate sets: keep the oldest (lowest id) per (name, user_id)
   sqliteDb.exec(`
     DELETE FROM sets
@@ -347,6 +391,8 @@ async function initDbSqlite() {
     ['idx_sessions_token', 'CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)'],
     ['idx_sets_user_id', 'CREATE INDEX IF NOT EXISTS idx_sets_user_id ON sets(user_id)'],
     ['idx_sets_updated_at', 'CREATE INDEX IF NOT EXISTS idx_sets_updated_at ON sets(updated_at)'],
+    ['idx_sets_share_token', 'CREATE INDEX IF NOT EXISTS idx_sets_share_token ON sets(share_token)'],
+    ['idx_sets_original_set_id', 'CREATE INDEX IF NOT EXISTS idx_sets_original_set_id ON sets(original_set_id)'],
   ];
   for (const [name, sql] of indexDefs) {
     if (!existingIndexes.includes(name)) {

@@ -353,6 +353,25 @@ export default function ManageSets() {
                   )}
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
+                  <a href={`/edit/${s.id}`} style={{ textDecoration: 'none' }}>
+                    <motion.button
+                      type="button"
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      style={{
+                        padding: '8px 14px', borderRadius: 10,
+                        background: 'rgba(139, 92, 246, 0.1)',
+                        border: '1px solid rgba(139, 92, 246, 0.3)',
+                        color: 'var(--accent-purple)',
+                        fontWeight: 600, fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                        display: 'flex', alignItems: 'center', gap: 4,
+                      }}
+                    >
+                      ✏️ Edit
+                    </motion.button>
+                  </a>
                   <motion.button
                     type="button"
                     title={s.is_shared ? 'Sharing is on — click to revoke' : 'Share this set'}

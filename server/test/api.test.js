@@ -354,6 +354,22 @@ describe('PUT /api/sets/:id', () => {
     expect(cards.body[0].front).toBe('new');
   });
 
+  test('update with multiple cards uses correct placeholders', async () => {
+    const id = await mkSet(regularToken, 'Multi Card', [{ front: 'old', back: 'oldb' }]);
+    const res = await as(regularToken).put(`/api/sets/${id}`).send({
+      name: 'Multi Update',
+      cards: [
+        { front: 'card1 front', back: 'card1 back' },
+        { front: 'card2 front', back: 'card2 back' },
+        { front: 'card3 front', back: 'card3 back' },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const cards = await as(regularToken).get(`/api/sets/${id}/cards`);
+    expect(cards.body).toHaveLength(3);
+    expect(cards.body.map(c => c.front).sort()).toEqual(['card1 front', 'card2 front', 'card3 front']);
+  });
+
   test('missing name → 400', async () => {
     const id = await mkSet(regularToken, 'No Name', [{ front: 'a', back: 'b' }]);
     const res = await as(regularToken).put(`/api/sets/${id}`).send({});

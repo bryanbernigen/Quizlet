@@ -280,17 +280,18 @@ app.put('/api/sets/:id', requireAuth, async (req, res) => {
       const validCards = cards.filter(c => c.front && c.back);
       if (validCards.length > 0) {
         const placeholders = validCards.map((_, i) =>
-          `($1, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
+          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
         ).join(', ');
+        const setId = parseInt(req.params.id, 10);
         const flatParams = validCards.flatMap(c => {
           const front = c.front.trim();
           const back = c.back.trim();
           const prev = existingMap.get(`${front}|||${back}`);
           return [
-            req.params.id, front, back,
-            prev ? prev.familiarity : 'unfamiliar',
-            prev ? prev.correct_count : 0,
-            prev ? prev.incorrect_count : 0,
+            setId, front, back,
+            (prev && prev.familiarity) ? prev.familiarity : 'unfamiliar',
+            (prev && prev.correct_count) ? Number(prev.correct_count) : 0,
+            (prev && prev.incorrect_count) ? Number(prev.incorrect_count) : 0,
           ];
         });
         await client.query(

@@ -29,8 +29,9 @@ vi.mock('../context/AuthContext', () => ({
   useApiFetch: () => apiFetchMock,
 }))
 
-function browseResponse(data) {
-  return { ok: true, json: () => Promise.resolve({ data }) }
+function browseResponse(data, totalPages = 1, total = null) {
+  const count = total !== null ? total : data.length
+  return { ok: true, json: () => Promise.resolve({ data, pagination: { page: 1, limit: 50, total: count, totalPages } }) }
 }
 
 function patchResponse() {
@@ -68,7 +69,7 @@ describe('WordBrowser', () => {
     apiFetchMock.mockResolvedValueOnce(browseResponse(cards))
     renderPage()
     await waitFor(() => expect(screen.getByText('안녕')).toBeInTheDocument())
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/cards/browse?limit=100')
+    expect(apiFetchMock).toHaveBeenCalledWith('/api/cards/browse?page=1')
   })
 
   it('shows loading state initially', async () => {
@@ -163,7 +164,7 @@ describe('WordBrowser', () => {
     await waitFor(() => screen.getByRole('button', { name: /All Words/ }))
     await userEvent.click(screen.getByRole('button', { name: /Familiar/ }))
     await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2))
-    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/cards/browse?familiarity=familiar&limit=100')
+    expect(apiFetchMock).toHaveBeenLastCalledWith('/api/cards/browse?familiarity=familiar&page=1')
   })
 
   it('clicking All Words chip removes filter', async () => {
@@ -173,13 +174,13 @@ describe('WordBrowser', () => {
     renderPage()
     await waitFor(() => screen.getByRole('button', { name: /All Words/ }))
     await userEvent.click(screen.getByRole('button', { name: /^All Words/ }))
-    await waitFor(() => expect(apiFetchMock).toHaveBeenLastCalledWith('/api/cards/browse?limit=100'))
+    await waitFor(() => expect(apiFetchMock).toHaveBeenLastCalledWith('/api/cards/browse?page=1'))
   })
 
   it('uses filter from URL params on mount', async () => {
     apiFetchMock.mockResolvedValueOnce(browseResponse(cards))
     renderPage('familiar')
-    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledWith('/api/cards/browse?familiarity=familiar&limit=100'))
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledWith('/api/cards/browse?familiarity=familiar&page=1'))
   })
 
   it('clicking a familiarity button calls PATCH /api/cards/:id/familiarity', async () => {

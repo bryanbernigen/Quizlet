@@ -31,21 +31,28 @@ export default function WordBrowser() {
   const [search, setSearch] = useState('')
   const [filterFamiliarity, setFilterFamiliarity] = useState(initialFilter)
   const [updatingId, setUpdatingId] = useState(null)
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [total, setTotal] = useState(0)
   const apiFetch = useApiFetch()
 
-  const fetchCards = async (famFilter) => {
+  const fetchCards = async (famFilter, pageNum) => {
     setLoading(true)
     const url = famFilter
-      ? `/api/cards/browse?familiarity=${famFilter}&limit=100`
-      : '/api/cards/browse?limit=100'
+      ? `/api/cards/browse?familiarity=${famFilter}&page=${pageNum}`
+      : `/api/cards/browse?page=${pageNum}`
     const res = await apiFetch(url)
     const result = await res.json()
     setCards(result.data || [])
+    setTotal(result.pagination?.total || 0)
+    setTotalPages(result.pagination?.totalPages || 0)
+    setPage(result.pagination?.page || 1)
     setLoading(false)
   }
 
   useEffect(() => {
-    fetchCards(filterFamiliarity)
+    setPage(1)
+    fetchCards(filterFamiliarity, 1)
   }, [filterFamiliarity])
 
   const handleFilterChange = (value) => {
@@ -121,7 +128,7 @@ export default function WordBrowser() {
             }}
           >
             {opt.emoji ? `${opt.emoji} ` : ''}{opt.label}
-            {filterFamiliarity === opt.value && ` (${cards.length})`}
+            {filterFamiliarity === opt.value && totalPages > 0 && ` (${total})`}
           </button>
         ))}
       </div>
@@ -152,8 +159,9 @@ export default function WordBrowser() {
       ) : (
         <div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: 16 }}>
-            Showing {filteredCards.length} word{filteredCards.length !== 1 ? 's' : ''}
+            Showing {filteredCards.length} of {total} word{total !== 1 ? 's' : ''}
             {search && ` matching "${search}"`}
+            {totalPages > 1 && ` · Page ${page} of ${totalPages}`}
           </p>
 
           {Object.entries(groupedCards).map(([setName, setCards]) => (
@@ -242,6 +250,48 @@ export default function WordBrowser() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 24 }}>
+          <motion.button
+            onClick={() => { setPage(p => p - 1); fetchCards(filterFamiliarity, page - 1) }}
+            disabled={page <= 1}
+            whileHover={page > 1 ? { scale: 1.05 } : {}}
+            whileTap={page > 1 ? { scale: 0.95 } : {}}
+            style={{
+              padding: '8px 20px', borderRadius: 10,
+              background: page <= 1 ? 'transparent' : 'rgba(139, 92, 246, 0.1)',
+              border: '1px solid var(--border-glass)',
+              color: page <= 1 ? 'var(--text-secondary)' : 'var(--accent-purple)',
+              fontWeight: 600, fontSize: '0.85rem',
+              cursor: page <= 1 ? 'default' : 'pointer',
+              fontFamily: 'inherit', opacity: page <= 1 ? 0.4 : 1,
+            }}
+          >
+            ← Prev
+          </motion.button>
+          <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', fontWeight: 600, minWidth: 100, textAlign: 'center' }}>
+            Page {page} of {totalPages}
+          </span>
+          <motion.button
+            onClick={() => { setPage(p => p + 1); fetchCards(filterFamiliarity, page + 1) }}
+            disabled={page >= totalPages}
+            whileHover={page < totalPages ? { scale: 1.05 } : {}}
+            whileTap={page < totalPages ? { scale: 0.95 } : {}}
+            style={{
+              padding: '8px 20px', borderRadius: 10,
+              background: page >= totalPages ? 'transparent' : 'rgba(139, 92, 246, 0.1)',
+              border: '1px solid var(--border-glass)',
+              color: page >= totalPages ? 'var(--text-secondary)' : 'var(--accent-purple)',
+              fontWeight: 600, fontSize: '0.85rem',
+              cursor: page >= totalPages ? 'default' : 'pointer',
+              fontFamily: 'inherit', opacity: page >= totalPages ? 0.4 : 1,
+            }}
+          >
+            Next →
+          </motion.button>
         </div>
       )}
     </motion.div>

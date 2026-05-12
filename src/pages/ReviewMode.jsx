@@ -569,6 +569,18 @@ export default function ReviewMode() {
               onClick={() => { if (!swiping) setIsFlipped(!isFlipped) }}
               whileTap={swiping ? {} : { cursor: 'grabbing' }}
             >
+              {card.set_name && (
+                <div style={{
+                  position: 'absolute', top: 14, left: 16, zIndex: 10,
+                  fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px',
+                  borderRadius: 20, background: 'rgba(139, 92, 246, 0.2)',
+                  border: '1px solid rgba(139, 92, 246, 0.35)',
+                  color: 'var(--accent-purple)',
+                  letterSpacing: '0.5px',
+                }}>
+                  📚 {card.set_name}
+                </div>
+              )}
               <motion.div
                 style={{
                   position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,

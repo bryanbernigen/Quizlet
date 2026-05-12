@@ -521,7 +521,7 @@ app.get('/api/cards/review', requireAuth, async (req, res) => {
   const filterClause = buildCardFilters(req.query, baseParams);
   const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
   const { rows } = await query(`
-    SELECT c.* FROM cards c
+    SELECT c.*, s.name AS set_name FROM cards c
     JOIN sets s ON s.id = c.set_id
     WHERE c.set_id IN (${placeholders}) AND s.user_id = $${ids.length + 1}${filterClause}
   `, baseParams);
@@ -576,7 +576,7 @@ app.get('/api/cards/quiz', requireAuth, async (req, res) => {
   const filterClause = buildCardFilters(req.query, baseParams);
   const placeholders = ids.map((_, i) => `$${i + 1}`).join(',');
   const { rows } = await query(`
-    SELECT c.* FROM cards c
+    SELECT c.*, s.name AS set_name FROM cards c
     JOIN sets s ON s.id = c.set_id
     WHERE c.set_id IN (${placeholders}) AND s.user_id = $${ids.length + 1}${filterClause}
   `, baseParams);

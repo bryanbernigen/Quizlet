@@ -546,6 +546,18 @@ export default function SpellingQuiz() {
           exit={{ opacity: 0, scale: 0.9, y: -20 }}
           transition={{ duration: 0.3 }}
         >
+          {card.set_name && (
+            <div style={{
+              fontSize: '0.7rem', fontWeight: 700, padding: '3px 10px',
+              borderRadius: 20, background: 'rgba(139, 92, 246, 0.2)',
+              border: '1px solid rgba(139, 92, 246, 0.35)',
+              color: 'var(--accent-purple)',
+              letterSpacing: '0.5px', marginBottom: 12,
+              display: 'inline-block',
+            }}>
+              📚 {card.set_name}
+            </div>
+          )}
           <div style={{
             fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '1.5px',
             color: 'var(--text-secondary)', marginBottom: 16, fontWeight: 600,

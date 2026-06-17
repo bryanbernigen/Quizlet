@@ -423,6 +423,57 @@ describe('ReviewMode', () => {
       expect(statCard).toHaveTextContent('1')
     })
 
+    describe('Navigation arrows', () => {
+      const startThreeCardReview = async (user) => {
+        render(<TestWrapper><ReviewMode /></TestWrapper>)
+        await waitFor(() => expect(screen.getByText('Korean Basics')).toBeInTheDocument())
+        await user.click(screen.getAllByRole('checkbox')[0])
+        await user.click(screen.getByRole('button', { name: /Start Review/i }))
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+      }
+
+      it('skip (▶) advances without rating, back (◀) returns', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('감사합니다')).toBeInTheDocument())
+
+        await user.click(screen.getByRole('button', { name: '◀ Back' }))
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+      })
+
+      it('back is disabled on the first card', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+        expect(screen.getByRole('button', { name: '◀ Back' })).toBeDisabled()
+      })
+
+      it('skip is disabled on the last card', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('감사합니다')).toBeInTheDocument())
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('사랑')).toBeInTheDocument())
+        expect(screen.getByRole('button', { name: 'Skip ▶' })).toBeDisabled()
+      })
+
+      it('skipping does not count toward the tally', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+        // Skip card 1, skip card 2, then rate card 3 familiar → tally should be exactly 1 familiar.
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('감사합니다')).toBeInTheDocument())
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('사랑')).toBeInTheDocument())
+        await user.click(screen.getByRole('button', { name: '✅ Familiar' }))
+        await waitFor(() => expect(screen.getByText('Review Complete!')).toBeInTheDocument())
+        const statCard = screen.getByText('Familiar').closest('.stat-card')
+        expect(statCard).toHaveTextContent('1')
+      })
+    })
+
     it('results screen Review Again restarts the session', async () => {
       const user = userEvent.setup()
       mockApiFetch.mockImplementation((url) => {

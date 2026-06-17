@@ -28,6 +28,7 @@ export default function ReviewMode() {
   const [swiping, setSwiping] = useState(false)
   const [exitDirection, setExitDirection] = useState({ x: 0, y: 0 })
   const [showCard, setShowCard] = useState(true)
+  const [editing, setEditing] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [sharedSetInfo, setSharedSetInfo] = useState(null)
@@ -155,6 +156,20 @@ export default function ReviewMode() {
       familiar: { x: 600, y: 0 },
     }
     handleSwipe(familiarity, dirs[familiarity].x, dirs[familiarity].y)
+  }
+
+  const goPrev = () => {
+    if (swiping || editing || currentIndex === 0) return
+    setIsFlipped(false)
+    setEditing(false)
+    setCurrentIndex(prev => prev - 1)
+  }
+
+  const goNext = () => {
+    if (swiping || editing || currentIndex >= cards.length - 1) return
+    setIsFlipped(false)
+    setEditing(false)
+    setCurrentIndex(prev => prev + 1)
   }
 
   const totalAvailableCards = sets
@@ -523,6 +538,18 @@ export default function ReviewMode() {
       </div>
 
       {/* Flashcard with AnimatePresence */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <motion.button
+          type="button"
+          className="btn-secondary"
+          onClick={goPrev}
+          disabled={currentIndex === 0 || editing || swiping}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          style={{ padding: '12px 14px', opacity: (currentIndex === 0 || editing || swiping) ? 0.4 : 1 }}
+        >
+          ◀ Back
+        </motion.button>
       <div className="flashcard-container" style={{ position: 'relative' }}>
         <AnimatePresence mode="wait">
           {showCard && card && (
@@ -611,6 +638,18 @@ export default function ReviewMode() {
             </motion.div>
           )}
         </AnimatePresence>
+      </div>
+        <motion.button
+          type="button"
+          className="btn-secondary"
+          onClick={goNext}
+          disabled={currentIndex >= cards.length - 1 || editing || swiping}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          style={{ padding: '12px 14px', opacity: (currentIndex >= cards.length - 1 || editing || swiping) ? 0.4 : 1 }}
+        >
+          Skip ▶
+        </motion.button>
       </div>
 
       {/* Action buttons as fallback */}

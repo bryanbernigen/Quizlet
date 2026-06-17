@@ -394,6 +394,35 @@ describe('ReviewMode', () => {
       expect(screen.getByText('Not Familiar')).toBeInTheDocument()
     })
 
+    it('completion tally counts each rated card once', async () => {
+      const user = userEvent.setup()
+      mockApiFetch.mockImplementation((url) => {
+        if (url === '/api/sets') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockSets) })
+        }
+        if (url.startsWith('/api/cards/review')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: 1, front: '안녕하세요', back: 'Halo' }]) })
+        }
+        return Promise.reject(new Error(`Unexpected URL: ${url}`))
+      })
+
+      render(<TestWrapper><ReviewMode /></TestWrapper>)
+
+      await waitFor(() => expect(screen.getByText('Korean Basics')).toBeInTheDocument())
+      await user.click(screen.getAllByRole('checkbox')[0])
+      await user.click(screen.getByRole('button', { name: /Start Review/i }))
+      await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+
+      await user.click(screen.getByRole('button', { name: '✅ Familiar' }))
+
+      await waitFor(() => expect(screen.getByText('Review Complete!')).toBeInTheDocument())
+
+      // The "Familiar" stat card value should be exactly 1.
+      const familiarLabel = screen.getByText('Familiar')
+      const statCard = familiarLabel.closest('.stat-card')
+      expect(statCard).toHaveTextContent('1')
+    })
+
     it('results screen Review Again restarts the session', async () => {
       const user = userEvent.setup()
       mockApiFetch.mockImplementation((url) => {

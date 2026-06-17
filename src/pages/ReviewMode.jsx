@@ -24,7 +24,7 @@ export default function ReviewMode() {
   const [isFlipped, setIsFlipped] = useState(false)
   const [started, setStarted] = useState(false)
   const [completed, setCompleted] = useState(false)
-  const [results, setResults] = useState({ familiar: 0, neutral: 0, unfamiliar: 0 })
+  const [ratings, setRatings] = useState({}) // { [cardIndex]: 'familiar' | 'neutral' | 'unfamiliar' }
   const [swiping, setSwiping] = useState(false)
   const [exitDirection, setExitDirection] = useState({ x: 0, y: 0 })
   const [showCard, setShowCard] = useState(true)
@@ -100,7 +100,7 @@ export default function ReviewMode() {
       setShowCard(true)
       setSwiping(false)
       swipingRef.current = false
-      setResults({ familiar: 0, neutral: 0, unfamiliar: 0 })
+      setRatings({})
     } catch (e) {
       setLoadError(e.message || 'Failed to load cards.')
     } finally {
@@ -109,7 +109,7 @@ export default function ReviewMode() {
   }
 
   const advanceCard = (familiarity) => {
-    setResults(prev => ({ ...prev, [familiarity]: prev[familiarity] + 1 }))
+    setRatings(prev => ({ ...prev, [currentIndex]: familiarity }))
 
     // Post familiarity update (only for authenticated users)
     if (user) {
@@ -162,6 +162,9 @@ export default function ReviewMode() {
     .reduce((sum, s) => sum + s.card_count, 0);
 
   const card = cards[currentIndex]
+
+  const results = { familiar: 0, neutral: 0, unfamiliar: 0 }
+  Object.values(ratings).forEach(f => { if (results[f] !== undefined) results[f]++ })
 
   // Setup screen
   if (!started) {

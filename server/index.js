@@ -485,6 +485,22 @@ app.patch('/api/cards/:id/familiarity', requireAuth, async (req, res) => {
   res.json({ message: 'Updated' });
 });
 
+app.patch('/api/cards/:id', requireAuth, async (req, res) => {
+  const { front, back } = req.body;
+  if (!front || !front.trim() || !back || !back.trim()) {
+    return res.status(400).json({ error: 'Front and back are required' });
+  }
+  const { rows } = await query(`
+    SELECT c.id FROM cards c JOIN sets s ON s.id = c.set_id
+    WHERE c.id = $1 AND s.user_id = $2
+  `, [req.params.id, req.userId]);
+  if (rows.length === 0) return res.status(404).json({ error: 'Card not found' });
+
+  await query('UPDATE cards SET front = $1, back = $2 WHERE id = $3',
+    [front.trim(), back.trim(), req.params.id]);
+  res.json({ message: 'Updated' });
+});
+
 // ==================== REVIEW ====================
 
 function buildCardFilters(queryParams, params) {

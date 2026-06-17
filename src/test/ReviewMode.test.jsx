@@ -87,6 +87,7 @@ const TestWrapper = ({ children, initialEntries = ['/review'] }) => (
 describe('ReviewMode', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUser.user = null
     mockApiFetch.mockImplementation((url) => {
       if (url === '/api/sets') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(mockSets) })
@@ -392,6 +393,163 @@ describe('ReviewMode', () => {
       expect(screen.getByText('Familiar')).toBeInTheDocument()
       expect(screen.getByText('Neutral')).toBeInTheDocument()
       expect(screen.getByText('Not Familiar')).toBeInTheDocument()
+    })
+
+    it('completion tally counts each rated card once', async () => {
+      const user = userEvent.setup()
+      mockApiFetch.mockImplementation((url) => {
+        if (url === '/api/sets') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve(mockSets) })
+        }
+        if (url.startsWith('/api/cards/review')) {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: 1, front: '안녕하세요', back: 'Halo' }]) })
+        }
+        return Promise.reject(new Error(`Unexpected URL: ${url}`))
+      })
+
+      render(<TestWrapper><ReviewMode /></TestWrapper>)
+
+      await waitFor(() => expect(screen.getByText('Korean Basics')).toBeInTheDocument())
+      await user.click(screen.getAllByRole('checkbox')[0])
+      await user.click(screen.getByRole('button', { name: /Start Review/i }))
+      await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+
+      await user.click(screen.getByRole('button', { name: '✅ Familiar' }))
+
+      await waitFor(() => expect(screen.getByText('Review Complete!')).toBeInTheDocument())
+
+      // The "Familiar" stat card value should be exactly 1.
+      const familiarLabel = screen.getByText('Familiar')
+      const statCard = familiarLabel.closest('.stat-card')
+      expect(statCard).toHaveTextContent('1')
+    })
+
+    describe('Navigation arrows', () => {
+      const startThreeCardReview = async (user) => {
+        render(<TestWrapper><ReviewMode /></TestWrapper>)
+        await waitFor(() => expect(screen.getByText('Korean Basics')).toBeInTheDocument())
+        await user.click(screen.getAllByRole('checkbox')[0])
+        await user.click(screen.getByRole('button', { name: /Start Review/i }))
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+      }
+
+      it('skip (▶) advances without rating, back (◀) returns', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('감사합니다')).toBeInTheDocument())
+
+        await user.click(screen.getByRole('button', { name: '◀ Back' }))
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+      })
+
+      it('back is disabled on the first card', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+        expect(screen.getByRole('button', { name: '◀ Back' })).toBeDisabled()
+      })
+
+      it('skip is disabled on the last card', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('감사합니다')).toBeInTheDocument())
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('사랑')).toBeInTheDocument())
+        expect(screen.getByRole('button', { name: 'Skip ▶' })).toBeDisabled()
+      })
+
+      it('skipping does not count toward the tally', async () => {
+        const user = userEvent.setup()
+        await startThreeCardReview(user)
+        // Skip card 1, skip card 2, then rate card 3 familiar → tally should be exactly 1 familiar.
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('감사합니다')).toBeInTheDocument())
+        await user.click(screen.getByRole('button', { name: 'Skip ▶' }))
+        await waitFor(() => expect(screen.getByText('사랑')).toBeInTheDocument())
+        await user.click(screen.getByRole('button', { name: '✅ Familiar' }))
+        await waitFor(() => expect(screen.getByText('Review Complete!')).toBeInTheDocument())
+        const statCard = screen.getByText('Familiar').closest('.stat-card')
+        expect(statCard).toHaveTextContent('1')
+      })
+    })
+
+    describe('Inline edit', () => {
+      const renderReview = async (user) => {
+        mockApiFetch.mockImplementation((url, options) => {
+          if (url === '/api/sets') {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(mockSets) })
+          }
+          if (url.startsWith('/api/cards/review')) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(mockCards) })
+          }
+          if (options?.method === 'PATCH' && /^\/api\/cards\/\d+$/.test(url)) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ message: 'Updated' }) })
+          }
+          if (/^\/api\/cards\/\d+\/familiarity$/.test(url)) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+          }
+          return Promise.reject(new Error(`Unexpected URL: ${url}`))
+        })
+        render(<TestWrapper><ReviewMode /></TestWrapper>)
+        await waitFor(() => expect(screen.getByText('Korean Basics')).toBeInTheDocument())
+        await user.click(screen.getAllByRole('checkbox')[0])
+        await user.click(screen.getByRole('button', { name: /Start Review/i }))
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+      }
+
+      it('edit button is hidden when no user is logged in', async () => {
+        const user = userEvent.setup()
+        mockUser.user = null
+        await renderReview(user)
+        expect(screen.queryByRole('button', { name: /Edit card/i })).not.toBeInTheDocument()
+      })
+
+      it('edit button shows for a logged-in owner and opens the form', async () => {
+        const user = userEvent.setup()
+        mockUser.user = { id: 1, username: 'owner' }
+        await renderReview(user)
+        await user.click(screen.getByRole('button', { name: /Edit card/i }))
+        expect(screen.getByDisplayValue('안녕하세요')).toBeInTheDocument()
+        expect(screen.getByDisplayValue('Halo')).toBeInTheDocument()
+      })
+
+      it('save calls PATCH and updates the displayed card text', async () => {
+        const user = userEvent.setup()
+        mockUser.user = { id: 1, username: 'owner' }
+        await renderReview(user)
+        await user.click(screen.getByRole('button', { name: /Edit card/i }))
+
+        const frontInput = screen.getByDisplayValue('안녕하세요')
+        await user.clear(frontInput)
+        await user.type(frontInput, '반갑습니다')
+        await user.click(screen.getByRole('button', { name: /Save/i }))
+
+        await waitFor(() => expect(screen.getByText('반갑습니다')).toBeInTheDocument())
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/api/cards/1',
+          expect.objectContaining({ method: 'PATCH' })
+        )
+      })
+
+      it('cancel discards changes without calling the API', async () => {
+        const user = userEvent.setup()
+        mockUser.user = { id: 1, username: 'owner' }
+        await renderReview(user)
+        await user.click(screen.getByRole('button', { name: /Edit card/i }))
+
+        const frontInput = screen.getByDisplayValue('안녕하세요')
+        await user.clear(frontInput)
+        await user.type(frontInput, 'throwaway')
+        await user.click(screen.getByRole('button', { name: /Cancel/i }))
+
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+        expect(mockApiFetch).not.toHaveBeenCalledWith(
+          '/api/cards/1',
+          expect.objectContaining({ method: 'PATCH' })
+        )
+      })
     })
 
     it('results screen Review Again restarts the session', async () => {

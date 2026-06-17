@@ -87,6 +87,7 @@ const TestWrapper = ({ children, initialEntries = ['/review'] }) => (
 describe('ReviewMode', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockUser.user = null
     mockApiFetch.mockImplementation((url) => {
       if (url === '/api/sets') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve(mockSets) })
@@ -471,6 +472,83 @@ describe('ReviewMode', () => {
         await waitFor(() => expect(screen.getByText('Review Complete!')).toBeInTheDocument())
         const statCard = screen.getByText('Familiar').closest('.stat-card')
         expect(statCard).toHaveTextContent('1')
+      })
+    })
+
+    describe('Inline edit', () => {
+      const renderReview = async (user) => {
+        mockApiFetch.mockImplementation((url, options) => {
+          if (url === '/api/sets') {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(mockSets) })
+          }
+          if (url.startsWith('/api/cards/review')) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve(mockCards) })
+          }
+          if (options?.method === 'PATCH' && /^\/api\/cards\/\d+$/.test(url)) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({ message: 'Updated' }) })
+          }
+          if (/^\/api\/cards\/\d+\/familiarity$/.test(url)) {
+            return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+          }
+          return Promise.reject(new Error(`Unexpected URL: ${url}`))
+        })
+        render(<TestWrapper><ReviewMode /></TestWrapper>)
+        await waitFor(() => expect(screen.getByText('Korean Basics')).toBeInTheDocument())
+        await user.click(screen.getAllByRole('checkbox')[0])
+        await user.click(screen.getByRole('button', { name: /Start Review/i }))
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+      }
+
+      it('edit button is hidden when no user is logged in', async () => {
+        const user = userEvent.setup()
+        mockUser.user = null
+        await renderReview(user)
+        expect(screen.queryByRole('button', { name: /Edit card/i })).not.toBeInTheDocument()
+      })
+
+      it('edit button shows for a logged-in owner and opens the form', async () => {
+        const user = userEvent.setup()
+        mockUser.user = { id: 1, username: 'owner' }
+        await renderReview(user)
+        await user.click(screen.getByRole('button', { name: /Edit card/i }))
+        expect(screen.getByDisplayValue('안녕하세요')).toBeInTheDocument()
+        expect(screen.getByDisplayValue('Halo')).toBeInTheDocument()
+      })
+
+      it('save calls PATCH and updates the displayed card text', async () => {
+        const user = userEvent.setup()
+        mockUser.user = { id: 1, username: 'owner' }
+        await renderReview(user)
+        await user.click(screen.getByRole('button', { name: /Edit card/i }))
+
+        const frontInput = screen.getByDisplayValue('안녕하세요')
+        await user.clear(frontInput)
+        await user.type(frontInput, '반갑습니다')
+        await user.click(screen.getByRole('button', { name: /Save/i }))
+
+        await waitFor(() => expect(screen.getByText('반갑습니다')).toBeInTheDocument())
+        expect(mockApiFetch).toHaveBeenCalledWith(
+          '/api/cards/1',
+          expect.objectContaining({ method: 'PATCH' })
+        )
+      })
+
+      it('cancel discards changes without calling the API', async () => {
+        const user = userEvent.setup()
+        mockUser.user = { id: 1, username: 'owner' }
+        await renderReview(user)
+        await user.click(screen.getByRole('button', { name: /Edit card/i }))
+
+        const frontInput = screen.getByDisplayValue('안녕하세요')
+        await user.clear(frontInput)
+        await user.type(frontInput, 'throwaway')
+        await user.click(screen.getByRole('button', { name: /Cancel/i }))
+
+        await waitFor(() => expect(screen.getByText('안녕하세요')).toBeInTheDocument())
+        expect(mockApiFetch).not.toHaveBeenCalledWith(
+          '/api/cards/1',
+          expect.objectContaining({ method: 'PATCH' })
+        )
       })
     })
 

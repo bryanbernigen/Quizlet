@@ -29,6 +29,10 @@ export default function ReviewMode() {
   const [exitDirection, setExitDirection] = useState({ x: 0, y: 0 })
   const [showCard, setShowCard] = useState(true)
   const [editing, setEditing] = useState(false)
+  const [editFront, setEditFront] = useState('')
+  const [editBack, setEditBack] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [sharedSetInfo, setSharedSetInfo] = useState(null)
@@ -170,6 +174,45 @@ export default function ReviewMode() {
     setIsFlipped(false)
     setEditing(false)
     setCurrentIndex(prev => prev + 1)
+  }
+
+  const startEdit = (e) => {
+    if (e) e.stopPropagation()
+    if (!card) return
+    setEditFront(card.front)
+    setEditBack(card.back)
+    setEditError('')
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setEditError('')
+  }
+
+  const saveEdit = async () => {
+    if (!editFront.trim() || !editBack.trim()) {
+      setEditError('Both fields are required.')
+      return
+    }
+    setEditSaving(true)
+    setEditError('')
+    try {
+      const res = await apiFetch(`/api/cards/${card.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ front: editFront.trim(), back: editBack.trim() }),
+      })
+      if (!res.ok) throw new Error('Failed to save')
+      const newFront = editFront.trim()
+      const newBack = editBack.trim()
+      setCards(prev => prev.map((c, i) => i === currentIndex ? { ...c, front: newFront, back: newBack } : c))
+      setEditing(false)
+    } catch (err) {
+      setEditError('Failed to save changes. Please try again.')
+    } finally {
+      setEditSaving(false)
+    }
   }
 
   const totalAvailableCards = sets
@@ -568,7 +611,7 @@ export default function ReviewMode() {
                 transition: { duration: 0.35, ease: 'easeIn' },
               }}
               transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-              drag={!swiping}
+              drag={!swiping && !editing}
               dragConstraints={{ left: 0, right: 0, top: 0, bottom: 0 }}
               dragElastic={0.9}
               onDrag={(_, info) => {
@@ -596,7 +639,7 @@ export default function ReviewMode() {
                 }
                 // else: card snaps back via animate
               }}
-              onClick={() => { if (!swiping) setIsFlipped(!isFlipped) }}
+              onClick={() => { if (!swiping && !editing) setIsFlipped(!isFlipped) }}
               whileTap={swiping ? {} : { cursor: 'grabbing' }}
             >
               {card.set_name && (
@@ -611,6 +654,65 @@ export default function ReviewMode() {
                   📚 {card.set_name}
                 </div>
               )}
+              {user && !isShared && !editing && (
+                <motion.button
+                  type="button"
+                  aria-label="Edit card"
+                  onClick={startEdit}
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.9 }}
+                  style={{
+                    position: 'absolute', top: 12, right: 14, zIndex: 10,
+                    background: 'rgba(139, 92, 246, 0.15)',
+                    border: '1px solid rgba(139, 92, 246, 0.35)',
+                    color: 'var(--accent-purple)', borderRadius: 10,
+                    padding: '4px 10px', fontSize: '0.9rem', cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  ✏️
+                </motion.button>
+              )}
+              {editing ? (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                    display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                    gap: 12, padding: 24, cursor: 'default',
+                  }}
+                >
+                  <div>
+                    <label className="form-label" style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}><KoreanFlag size={16} /> Korean (front)</label>
+                    <input
+                      className="form-input"
+                      value={editFront}
+                      onChange={e => setEditFront(e.target.value)}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}><IndonesianFlag size={16} /> Indonesian (back)</label>
+                    <input
+                      className="form-input"
+                      value={editBack}
+                      onChange={e => setEditBack(e.target.value)}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                  {editError && (
+                    <div style={{ color: 'var(--accent-red)', fontSize: '0.8rem', fontWeight: 600 }}>{editError}</div>
+                  )}
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <button type="button" className="btn-primary" onClick={saveEdit} disabled={editSaving} style={{ padding: '8px 20px', opacity: editSaving ? 0.5 : 1 }}>
+                      {editSaving ? '⏳ Saving...' : '💾 Save'}
+                    </button>
+                    <button type="button" className="btn-secondary" onClick={cancelEdit} disabled={editSaving} style={{ padding: '8px 20px' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <motion.div
                 style={{
                   position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
@@ -630,6 +732,7 @@ export default function ReviewMode() {
                   <div className="flashcard-text">{getBack(card)}</div>
                 </div>
               </motion.div>
+              )}
 
               {/* Swipe direction overlays — shown via drag offset */}
               <SwipeOverlay direction="left" />
@@ -657,30 +760,30 @@ export default function ReviewMode() {
         <motion.button
           className="btn-secondary"
           onClick={() => handleButtonSwipe('unfamiliar')}
-          disabled={swiping}
+          disabled={swiping || editing}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          style={{ borderColor: 'rgba(239, 68, 68, 0.3)', color: 'var(--accent-red)', opacity: swiping ? 0.5 : 1 }}
+          style={{ borderColor: 'rgba(239, 68, 68, 0.3)', color: 'var(--accent-red)', opacity: (swiping || editing) ? 0.5 : 1 }}
         >
           ❌ Not Familiar
         </motion.button>
         <motion.button
           className="btn-secondary"
           onClick={() => handleButtonSwipe('neutral')}
-          disabled={swiping}
+          disabled={swiping || editing}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          style={{ borderColor: 'rgba(245, 158, 11, 0.3)', color: 'var(--accent-amber)', opacity: swiping ? 0.5 : 1 }}
+          style={{ borderColor: 'rgba(245, 158, 11, 0.3)', color: 'var(--accent-amber)', opacity: (swiping || editing) ? 0.5 : 1 }}
         >
           ➖ Neutral
         </motion.button>
         <motion.button
           className="btn-secondary"
           onClick={() => handleButtonSwipe('familiar')}
-          disabled={swiping}
+          disabled={swiping || editing}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          style={{ borderColor: 'rgba(16, 185, 129, 0.3)', color: 'var(--accent-green)', opacity: swiping ? 0.5 : 1 }}
+          style={{ borderColor: 'rgba(16, 185, 129, 0.3)', color: 'var(--accent-green)', opacity: (swiping || editing) ? 0.5 : 1 }}
         >
           ✅ Familiar
         </motion.button>

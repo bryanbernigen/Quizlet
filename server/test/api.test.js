@@ -695,6 +695,63 @@ describe('PATCH /api/cards/:id/familiarity', () => {
   });
 });
 
+describe('PATCH /api/cards/:id', () => {
+  let setId, cardId;
+  beforeEach(async () => {
+    setId = await mkSet(regularToken, 'Edit Card Set', [{ front: 'oldFront', back: 'oldBack' }]);
+    const r = await as(regularToken).get(`/api/sets/${setId}/cards`);
+    cardId = r.body[0].id;
+  });
+
+  test('200 and updates front/back', async () => {
+    const res = await as(regularToken).patch(`/api/cards/${cardId}`).send({ front: 'newFront', back: 'newBack' });
+    expect(res.status).toBe(200);
+
+    const cards = (await as(regularToken).get(`/api/sets/${setId}/cards`)).body;
+    expect(cards[0].front).toBe('newFront');
+    expect(cards[0].back).toBe('newBack');
+  });
+
+  test('trims whitespace', async () => {
+    await as(regularToken).patch(`/api/cards/${cardId}`).send({ front: '  spaced  ', back: '  out  ' });
+    const cards = (await as(regularToken).get(`/api/sets/${setId}/cards`)).body;
+    expect(cards[0].front).toBe('spaced');
+    expect(cards[0].back).toBe('out');
+  });
+
+  test('preserves familiarity on text edit', async () => {
+    await as(regularToken).patch(`/api/cards/${cardId}/familiarity`).send({ familiarity: 'familiar' });
+    await as(regularToken).patch(`/api/cards/${cardId}`).send({ front: 'x', back: 'y' });
+    const cards = (await as(regularToken).get(`/api/sets/${setId}/cards`)).body;
+    expect(cards[0].familiarity).toBe('familiar');
+  });
+
+  test('missing front → 400', async () => {
+    const res = await as(regularToken).patch(`/api/cards/${cardId}`).send({ back: 'onlyBack' });
+    expect(res.status).toBe(400);
+  });
+
+  test('blank back → 400', async () => {
+    const res = await as(regularToken).patch(`/api/cards/${cardId}`).send({ front: 'f', back: '   ' });
+    expect(res.status).toBe(400);
+  });
+
+  test('non-owner → 404', async () => {
+    const res = await as(adminToken).patch(`/api/cards/${cardId}`).send({ front: 'hijack', back: 'attempt' });
+    expect(res.status).toBe(404);
+  });
+
+  test('non-existent card → 404', async () => {
+    const res = await as(regularToken).patch('/api/cards/99999').send({ front: 'a', back: 'b' });
+    expect(res.status).toBe(404);
+  });
+
+  test('no token → 401', async () => {
+    const res = await request(app).patch(`/api/cards/${cardId}`).send({ front: 'a', back: 'b' });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe('GET /api/stats', () => {
   beforeEach(async () => {
     await mkSet(regularToken, 'Stats Set', [{ front: 'sf1', back: 'sb1' }, { front: 'sf2', back: 'sb2' }]);

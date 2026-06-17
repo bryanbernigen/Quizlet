@@ -396,6 +396,67 @@ describe('PUT /api/sets/:id', () => {
     const cards = await as(regularToken).get(`/api/sets/${id}/cards`);
     expect(cards.body[0].familiarity).toBe('unfamiliar');
   });
+
+  test('preserves card ids when card text is unchanged', async () => {
+    const id = await mkSet(regularToken, 'Stable', [
+      { front: 'a', back: 'b' },
+      { front: 'c', back: 'd' },
+    ]);
+    const before = (await as(regularToken).get(`/api/sets/${id}/cards`)).body;
+    const beforeIds = before.map(c => c.id).sort((x, y) => x - y);
+
+    await as(regularToken).put(`/api/sets/${id}`).send({
+      name: 'Stable Renamed',
+      cards: [{ front: 'a', back: 'b' }, { front: 'c', back: 'd' }],
+    });
+
+    const after = (await as(regularToken).get(`/api/sets/${id}/cards`)).body;
+    const afterIds = after.map(c => c.id).sort((x, y) => x - y);
+    expect(afterIds).toEqual(beforeIds);
+  });
+
+  test('preserves stats and quiz history of unchanged cards across edit', async () => {
+    const id = await mkSet(regularToken, 'Keep Stats', [{ front: 'keep', back: 'kb' }]);
+    const cardId = (await as(regularToken).get(`/api/sets/${id}/cards`)).body[0].id;
+
+    await as(regularToken).post(`/api/cards/${cardId}/quiz-result`).send({ isCorrect: true });
+    await as(regularToken).patch(`/api/cards/${cardId}/familiarity`).send({ familiarity: 'familiar' });
+
+    // Edit the set: keep the existing card, add a new one
+    await as(regularToken).put(`/api/sets/${id}`).send({
+      name: 'Keep Stats',
+      cards: [{ front: 'keep', back: 'kb' }, { front: 'added', back: 'ab' }],
+    });
+
+    const cards = (await as(regularToken).get(`/api/sets/${id}/cards`)).body;
+    const kept = cards.find(c => c.front === 'keep');
+    expect(kept.id).toBe(cardId);            // same row, not delete+reinsert
+    expect(kept.correct_count).toBe(1);      // quiz stats survive
+    expect(kept.familiarity).toBe('familiar');
+
+    // quiz_history row for the kept card must still exist (not cascade-deleted)
+    const { rows } = await query('SELECT COUNT(*) AS n FROM quiz_history WHERE card_id = $1', [cardId]);
+    expect(Number(rows[0].n)).toBe(1);
+  });
+
+  test('removing a card deletes only that card', async () => {
+    const id = await mkSet(regularToken, 'Remove One', [
+      { front: 'a', back: 'b' },
+      { front: 'c', back: 'd' },
+    ]);
+    const before = (await as(regularToken).get(`/api/sets/${id}/cards`)).body;
+    const keepId = before.find(c => c.front === 'a').id;
+
+    await as(regularToken).put(`/api/sets/${id}`).send({
+      name: 'Remove One',
+      cards: [{ front: 'a', back: 'b' }],
+    });
+
+    const after = (await as(regularToken).get(`/api/sets/${id}/cards`)).body;
+    expect(after).toHaveLength(1);
+    expect(after[0].front).toBe('a');
+    expect(after[0].id).toBe(keepId);        // surviving card keeps its id
+  });
 });
 
 describe('DELETE /api/sets/:id', () => {
@@ -831,6 +892,32 @@ describe('POST /api/import', () => {
     });
     expect(res.body.setsCreated).toBe(0);
     expect(res.body.setsUpdated).toBe(1);
+  });
+
+  test('rolls back the whole import when a card insert fails (atomic)', async () => {
+    // Duplicate cards within one set violate the unique (set_id, front, back)
+    // constraint. The import must roll back rather than leave a half-created set.
+    const res = await as(regularToken).post('/api/import').send({
+      sets: [{ name: 'Atomic', cards: [{ front: 'dup', back: 'd' }, { front: 'dup', back: 'd' }] }],
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const sets = (await as(regularToken).get('/api/sets')).body;
+    expect(sets.some(s => s.name === 'Atomic')).toBe(false);
+  });
+
+  test('handles a mix of created and updated cards', async () => {
+    await mkSet(regularToken, 'Mixed', [{ front: 'keep', back: 'kb' }]);
+    const res = await as(regularToken).post('/api/import').send({
+      sets: [{ name: 'Mixed', cards: [
+        { front: 'keep', back: 'kb' },     // existing → update path
+        { front: 'fresh', back: 'fb' },    // new → insert path
+      ] }],
+    });
+    expect(res.body.cardsCreated).toBe(1);
+    expect(res.body.cardsUpdated).toBe(1);
+    const setId = (await as(regularToken).get('/api/sets')).body.find(s => s.name === 'Mixed').id;
+    const cards = (await as(regularToken).get(`/api/sets/${setId}/cards`)).body;
+    expect(cards.map(c => c.front).sort()).toEqual(['fresh', 'keep']);
   });
 });
 

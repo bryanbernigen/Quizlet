@@ -201,26 +201,17 @@ app.post('/api/sets', requireAuth, async (req, res) => {
 });
 
 app.get('/api/sets/:id', requireAuth, async (req, res) => {
-  const { rows: existing } = await query(
-    'SELECT id FROM sets WHERE id = $1',
-    [req.params.id]
+  // Existence + ownership + card count in a single query. A set owned by another
+  // user (or a missing one) is filtered out by the WHERE and yields no row → 404.
+  const { rows } = await query(
+    `SELECT s.*, ${int('COUNT(c.id)')} AS card_count
+     FROM sets s LEFT JOIN cards c ON c.set_id = s.id
+     WHERE s.id = $1 AND s.user_id = $2 GROUP BY s.id`,
+    [req.params.id, req.userId]
   );
-  if (existing.length === 0) {
+  if (rows.length === 0) {
     return res.status(404).json({ error: 'Set not found' });
   }
-  if (existing.length > 0) {
-    const { rows: ownerRows } = await query(
-      'SELECT id FROM sets WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
-    );
-    if (ownerRows.length === 0) {
-      return res.status(404).json({ error: 'Set not found' });
-    }
-  }
-  const { rows } = await query(
-    `SELECT s.*, ${int('COUNT(c.id)')} AS card_count FROM sets s LEFT JOIN cards c ON c.set_id = s.id WHERE s.id = $1 GROUP BY s.id`,
-    [req.params.id]
-  );
   res.json(rows[0]);
 });
 
@@ -242,21 +233,16 @@ app.put('/api/sets/:id', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Name is required' });
   }
 
+  // One lookup distinguishes missing (404) from not-owned (403).
   const { rows: existing } = await query(
-    'SELECT id FROM sets WHERE id = $1',
+    'SELECT user_id FROM sets WHERE id = $1',
     [req.params.id]
   );
   if (existing.length === 0) {
     return res.status(404).json({ error: 'Set not found' });
   }
-  if (existing.length > 0) {
-    const { rows: ownerRows } = await query(
-      'SELECT id FROM sets WHERE id = $1 AND user_id = $2',
-      [req.params.id, req.userId]
-    );
-    if (ownerRows.length === 0) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
+  if (existing[0].user_id !== req.userId) {
+    return res.status(403).json({ error: 'Forbidden' });
   }
 
   const client = await getClient();
@@ -268,34 +254,50 @@ app.put('/api/sets/:id', requireAuth, async (req, res) => {
     );
 
     if (cards && Array.isArray(cards)) {
+      const setId = parseInt(req.params.id, 10);
       const { rows: existingCards } = await client.query(
-        'SELECT * FROM cards WHERE set_id = $1',
-        [req.params.id]
+        'SELECT id, front, back FROM cards WHERE set_id = $1',
+        [setId]
       );
-      const existingMap = new Map();
-      existingCards.forEach(c => existingMap.set(`${c.front}|||${c.back}`, c));
+      // Diff incoming cards against existing rows by (front, back). Rows whose
+      // text is unchanged are left untouched — preserving their id, familiarity,
+      // attempt counts, and quiz_history (which would otherwise cascade-delete).
+      // Only genuinely new cards are inserted and removed cards deleted, so an
+      // edit touches just the affected rows instead of rewriting the whole pack.
+      const existingByKey = new Map();
+      existingCards.forEach(c => existingByKey.set(`${c.front}|||${c.back}`, c));
 
-      await client.query('DELETE FROM cards WHERE set_id = $1', [req.params.id]);
+      const keptIds = new Set();
+      const toInsert = [];
+      const seenKeys = new Set();
+      for (const c of cards) {
+        if (!c.front || !c.back) continue;
+        const front = c.front.trim();
+        const back = c.back.trim();
+        const key = `${front}|||${back}`;
+        if (seenKeys.has(key)) continue; // skip duplicates within the payload
+        seenKeys.add(key);
+        const existing = existingByKey.get(key);
+        if (existing) {
+          keptIds.add(existing.id);
+        } else {
+          toInsert.push([setId, front, back]);
+        }
+      }
 
-      const validCards = cards.filter(c => c.front && c.back);
-      if (validCards.length > 0) {
-        const placeholders = validCards.map((_, i) =>
-          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
+      const toDelete = existingCards.filter(c => !keptIds.has(c.id)).map(c => c.id);
+      if (toDelete.length > 0) {
+        const placeholders = toDelete.map((_, i) => `$${i + 1}`).join(', ');
+        await client.query(`DELETE FROM cards WHERE id IN (${placeholders})`, toDelete);
+      }
+
+      if (toInsert.length > 0) {
+        const placeholders = toInsert.map((_, i) =>
+          `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`
         ).join(', ');
-        const setId = parseInt(req.params.id, 10);
-        const flatParams = validCards.flatMap(c => {
-          const front = c.front.trim();
-          const back = c.back.trim();
-          const prev = existingMap.get(`${front}|||${back}`);
-          return [
-            setId, front, back,
-            (prev && prev.familiarity) ? prev.familiarity : 'unfamiliar',
-            (prev && prev.correct_count) ? Number(prev.correct_count) : 0,
-            (prev && prev.incorrect_count) ? Number(prev.incorrect_count) : 0,
-          ];
-        });
+        const flatParams = toInsert.flat();
         await client.query(
-          `INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count) VALUES ${placeholders}`,
+          `INSERT INTO cards (set_id, front, back) VALUES ${placeholders}`,
           flatParams
         );
       }
@@ -727,91 +729,103 @@ app.post('/api/import', requireAuth, async (req, res) => {
 
   const setNames = validSets.map(s => s.name);
   const setNamePlaceholders = setNames.map((_, i) => `$${i + 1}`).join(', ');
-  const { rows: existingSets } = await query(
-    `SELECT id, name FROM sets WHERE name IN (${setNamePlaceholders}) AND user_id = $${setNames.length + 1}`,
-    [...setNames, req.userId]
-  );
-  const setMap = new Map(existingSets.map(s => [s.name, s.id]));
-  const newSets = [];
   const nowVal = now();
 
-  for (const setData of validSets) {
-    if (setMap.has(setData.name)) {
-      const setId = typeof setMap.get(setData.name) === 'number' ? setMap.get(setData.name) : setMap.get(setData.name).id;
-      await query(`UPDATE sets SET updated_at = ${nowVal} WHERE id = $1`, [setId]);
-      setMap.set(setData.name, { id: setId, isUpdate: true });
-    } else {
-      const insResult = await query(
-        `INSERT INTO sets (name, user_id, created_at, updated_at) VALUES ($1, $2, ${nowVal}, ${nowVal}) RETURNING id`,
-        [setData.name, req.userId]
-      );
-      const newId = insResult.lastInsertRowid;
-      // For SQLite, fetch the actual id from the inserted row
-      const { rows: [{ id: fetchedId }] } = await query('SELECT id FROM sets WHERE rowid = $1', [newId]);
-      setMap.set(setData.name, { id: fetchedId, isUpdate: false });
-      newSets.push(setData.name);
-    }
-  }
+  // Run the entire import in one transaction on a single connection so a failure
+  // partway through rolls back cleanly instead of leaving half-created sets, and
+  // so the writes don't each check out a separate pooled connection.
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
 
-  const setIds = [...setMap.values()].map(v => v.id);
-  const idPlaceholders = setIds.map((_, i) => `$${i + 1}`).join(', ');
-  const { rows: existingCards } = await query(
-    `SELECT id, set_id, front, back, correct_count, incorrect_count FROM cards WHERE set_id IN (${idPlaceholders})`,
-    setIds
-  );
-  const cardMap = new Map(existingCards.map(c => [`${c.set_id}|${c.front}|${c.back}`, c]));
+    const { rows: existingSets } = await client.query(
+      `SELECT id, name FROM sets WHERE name IN (${setNamePlaceholders}) AND user_id = $${setNames.length + 1}`,
+      [...setNames, req.userId]
+    );
+    const setMap = new Map(existingSets.map(s => [s.name, s.id]));
+    const newSets = [];
 
-  const cardsToInsert = [];
-  const cardsToUpdate = [];
-
-  for (const setData of validSets) {
-    const setId = setMap.get(setData.name).id;
-    for (const card of setData.cards) {
-      if (!card.front || !card.back) continue;
-      const front = card.front.trim();
-      const back = card.back.trim();
-      const key = `${setId}|${front}|${back}`;
-      const familiarity = card.familiarity || 'unfamiliar';
-      const correct = card.correct_count || 0;
-      const incorrect = card.incorrect_count || 0;
-      const existing = cardMap.get(key);
-      if (existing) {
-        cardsToUpdate.push({
-          id: existing.id,
-          familiarity,
-          correct: Math.max(correct, existing.correct_count),
-          incorrect: Math.max(incorrect, existing.incorrect_count),
-        });
+    for (const setData of validSets) {
+      if (setMap.has(setData.name)) {
+        const prev = setMap.get(setData.name);
+        const setId = typeof prev === 'number' ? prev : prev.id;
+        await client.query(`UPDATE sets SET updated_at = ${nowVal} WHERE id = $1`, [setId]);
+        setMap.set(setData.name, { id: setId, isUpdate: true });
       } else {
-        cardsToInsert.push({ setId, front, back, familiarity, correct, incorrect });
+        const insResult = await client.query(
+          `INSERT INTO sets (name, user_id, created_at, updated_at) VALUES ($1, $2, ${nowVal}, ${nowVal}) RETURNING id`,
+          [setData.name, req.userId]
+        );
+        setMap.set(setData.name, { id: insResult.rows[0].id, isUpdate: false });
+        newSets.push(setData.name);
       }
     }
-  }
 
-  // Batch insert new cards
-  if (cardsToInsert.length > 0) {
-    const placeholders = cardsToInsert.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
-    const flatParams = cardsToInsert.flatMap(c => [c.setId, c.front, c.back, c.familiarity, c.correct, c.incorrect]);
-    await query(`INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count) VALUES ${placeholders}`, flatParams);
-  }
+    const setIds = [...setMap.values()].map(v => v.id);
+    const idPlaceholders = setIds.map((_, i) => `$${i + 1}`).join(', ');
+    const { rows: existingCards } = await client.query(
+      `SELECT id, set_id, front, back, correct_count, incorrect_count FROM cards WHERE set_id IN (${idPlaceholders})`,
+      setIds
+    );
+    const cardMap = new Map(existingCards.map(c => [`${c.set_id}|${c.front}|${c.back}`, c]));
 
-  // Batch update existing cards
-  if (cardsToUpdate.length > 0) {
+    const cardsToInsert = [];
+    const cardsToUpdate = [];
+
+    for (const setData of validSets) {
+      const setId = setMap.get(setData.name).id;
+      for (const card of setData.cards) {
+        if (!card.front || !card.back) continue;
+        const front = card.front.trim();
+        const back = card.back.trim();
+        const key = `${setId}|${front}|${back}`;
+        const familiarity = card.familiarity || 'unfamiliar';
+        const correct = card.correct_count || 0;
+        const incorrect = card.incorrect_count || 0;
+        const existing = cardMap.get(key);
+        if (existing) {
+          cardsToUpdate.push({
+            id: existing.id,
+            familiarity,
+            correct: Math.max(correct, existing.correct_count),
+            incorrect: Math.max(incorrect, existing.incorrect_count),
+          });
+        } else {
+          cardsToInsert.push({ setId, front, back, familiarity, correct, incorrect });
+        }
+      }
+    }
+
+    // Batch insert new cards
+    if (cardsToInsert.length > 0) {
+      const placeholders = cardsToInsert.map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`).join(', ');
+      const flatParams = cardsToInsert.flatMap(c => [c.setId, c.front, c.back, c.familiarity, c.correct, c.incorrect]);
+      await client.query(`INSERT INTO cards (set_id, front, back, familiarity, correct_count, incorrect_count) VALUES ${placeholders}`, flatParams);
+    }
+
+    // Update existing cards (reuses the one transaction connection)
     for (const card of cardsToUpdate) {
-      await query(
+      await client.query(
         'UPDATE cards SET familiarity = $1, correct_count = $2, incorrect_count = $3 WHERE id = $4',
         [card.familiarity, card.correct, card.incorrect, card.id]
       );
     }
-  }
 
-  res.json({
-    message: 'Import successful',
-    setsCreated: newSets.length,
-    setsUpdated: setNames.length - newSets.length,
-    cardsCreated: cardsToInsert.length,
-    cardsUpdated: cardsToUpdate.length,
-  });
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Import successful',
+      setsCreated: newSets.length,
+      setsUpdated: setNames.length - newSets.length,
+      cardsCreated: cardsToInsert.length,
+      cardsUpdated: cardsToUpdate.length,
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
 });
 
 // Only listen in local development (Vercel handles the port in production)

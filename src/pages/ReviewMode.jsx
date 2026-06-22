@@ -581,7 +581,7 @@ export default function ReviewMode() {
       </div>
 
       {/* Flashcard with AnimatePresence */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, width: '100%', maxWidth: 640 }}>
         <motion.button
           type="button"
           className="btn-secondary"

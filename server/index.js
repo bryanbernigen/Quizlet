@@ -220,6 +220,55 @@ app.delete('/api/admin/users/:id', requireAuth, requireAdmin, async (req, res) =
   res.json({ message: 'User deleted' });
 });
 
+// ==================== ADMIN: GUEST MANAGEMENT ====================
+
+app.get('/api/admin/guests', requireAuth, requireAdmin, async (_req, res) => {
+  await purgeExpiredGuests();
+  const { rows } = await query(`
+    SELECT u.id, u.username, u.created_at, u.expires_at,
+      ${int('COUNT(DISTINCT s.id)')} AS set_count,
+      ${int('COUNT(c.id)')} AS card_count
+    FROM users u
+    LEFT JOIN sets s ON s.user_id = u.id
+    LEFT JOIN cards c ON c.set_id = s.id
+    WHERE u.is_guest = TRUE AND u.expires_at > ${now()}
+    GROUP BY u.id, u.username, u.created_at, u.expires_at
+    ORDER BY u.expires_at ASC
+  `, []);
+  res.json(rows.map(r => ({
+    id: r.id,
+    username: r.username,
+    created_at: r.created_at,
+    expires_at: r.expires_at,
+    set_count: Number(r.set_count),
+    card_count: Number(r.card_count),
+  })));
+});
+
+app.get('/api/admin/settings', requireAuth, requireAdmin, async (_req, res) => {
+  res.json({
+    guest_ttl_minutes: parseInt(await getSetting('guest_ttl_minutes', '60'), 10),
+    guest_max_concurrent: parseInt(await getSetting('guest_max_concurrent', '10'), 10),
+  });
+});
+
+app.put('/api/admin/settings', requireAuth, requireAdmin, async (req, res) => {
+  const keys = ['guest_ttl_minutes', 'guest_max_concurrent'];
+  for (const key of keys) {
+    if (req.body[key] !== undefined) {
+      const n = parseInt(req.body[key], 10);
+      if (!Number.isInteger(n) || n < 1) {
+        return res.status(400).json({ error: `${key} must be a positive integer` });
+      }
+      await setSetting(key, String(n));
+    }
+  }
+  res.json({
+    guest_ttl_minutes: parseInt(await getSetting('guest_ttl_minutes', '60'), 10),
+    guest_max_concurrent: parseInt(await getSetting('guest_max_concurrent', '10'), 10),
+  });
+});
+
 // ==================== SETS (all protected) ====================
 
 app.get('/api/sets', requireAuth, async (req, res) => {

@@ -47,12 +47,19 @@ vi.mock('crypto', async (importOriginal) => {
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+
+// Use a DB file unique to this test file. Vitest runs test files in parallel
+// worker threads that share the config-level DB_PATH; without this override
+// guest.test.js and api.test.js would open the same SQLite file and collide.
+// process.env is per-worker, so this override does not affect other files.
+const DB_PATH = path.join(os.tmpdir(), `quizlet-guest-test-${process.pid}.db`);
+process.env.DB_PATH = DB_PATH;
+try { fs.unlinkSync(DB_PATH); } catch {}
+
 import request from 'supertest';
 import app from '../index.js';
 import { query, getClient, initDb, getSetting, setSetting, generateToken, hashPassword } from '../db.js';
 import { seedGuestContent, GUEST_SEED_SETS } from '../guestSeed.js';
-
-const DB_PATH = path.join(os.tmpdir(), `quizlet-guest-test-${process.pid}.db`);
 
 async function resetDb() {
   await query('PRAGMA foreign_keys = OFF', []);

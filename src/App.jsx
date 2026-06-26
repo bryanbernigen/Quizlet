@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { lazy, Suspense } from 'react'
 import LoginPage from './pages/LoginPage'
+import GuestBanner from './components/GuestBanner'
 import { KoreanFlag, IndonesianFlag } from './components/Flag'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -86,6 +87,7 @@ function AppContent() {
           </div>
         )}
       </nav>
+      <GuestBanner />
 
       <div style={{ flex: 1 }}>
         <AnimatePresence mode="wait">

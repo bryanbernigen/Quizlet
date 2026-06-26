@@ -75,6 +75,21 @@ export function AuthProvider({ children }) {
     return data
   }
 
+  const loginAsGuest = async () => {
+    const res = await fetch('/api/auth/guest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Could not start a guest session')
+
+    localStorage.setItem('koreaquiz_token', data.token)
+    setToken(data.token)
+    setUser(data.user)
+    return data
+  }
+
   const logout = async () => {
     if (token) {
       await fetch('/api/auth/logout', {
@@ -88,7 +103,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading }}>
+    <AuthContext.Provider value={{ user, token, login, loginAsGuest, logout, loading }}>
       {children}
     </AuthContext.Provider>
   )

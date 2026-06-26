@@ -466,3 +466,50 @@ describe('useApiFetch', () => {
     expect(call[1].headers?.['Content-Type']).toBe('application/json')
   })
 })
+
+describe('loginAsGuest()', () => {
+  it('stores the guest token and sets the guest user', async () => {
+    const guestUser = { id: 9, username: 'guest_abc', is_guest: true, expires_at: '2099-01-01 00:00:00' }
+    global.fetch = vi.fn((url, options) => {
+      if (url === '/api/auth/guest' && options.method === 'POST') {
+        return Promise.resolve({ ok: true, status: 201, json: () => Promise.resolve({ token: 'guesttoken', user: guestUser }) })
+      }
+      if (url === '/api/auth/me') {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(guestUser) })
+      }
+      return Promise.reject(new Error(`Unexpected fetch call: ${url}`))
+    })
+
+    let capturedAuth = null
+    function TestComponent() {
+      const auth = useAuth()
+      useEffect(() => { capturedAuth = auth }, [auth])
+      return <button onClick={() => auth.loginAsGuest()}>Guest</button>
+    }
+
+    const { getByRole } = render(<AuthProvider><TestComponent /></AuthProvider>)
+    getByRole('button', { name: 'Guest' }).click()
+
+    await waitFor(() => { expect(capturedAuth?.user?.is_guest).toBe(true) })
+    expect(localStorage.getItem('koreaquiz_token')).toBe('guesttoken')
+    expect(global.fetch).toHaveBeenCalledWith('/api/auth/guest', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('throws the server error when guest spots are full', async () => {
+    global.fetch = vi.fn(() => Promise.resolve({
+      ok: false, status: 503,
+      json: () => Promise.resolve({ error: 'Guest spots are full, please try again shortly.' }),
+    }))
+
+    let capturedAuth = null
+    function TestComponent() {
+      const auth = useAuth()
+      useEffect(() => { capturedAuth = auth }, [auth])
+      return null
+    }
+    render(<AuthProvider><TestComponent /></AuthProvider>)
+    await waitFor(() => { expect(capturedAuth?.loginAsGuest).toBeInstanceOf(Function) })
+
+    await expect(capturedAuth.loginAsGuest()).rejects.toThrow(/full/i)
+  })
+})

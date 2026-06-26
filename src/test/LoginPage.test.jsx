@@ -39,6 +39,7 @@ vi.mock('framer-motion', () => ({
 
 const mockLogin = vi.fn()
 const mockLogout = vi.fn()
+const mockLoginAsGuest = vi.fn()
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
@@ -46,6 +47,7 @@ vi.mock('../context/AuthContext', () => ({
     loading: false,
     token: null,
     login: mockLogin,
+    loginAsGuest: mockLoginAsGuest,
     logout: mockLogout,
   }),
   useApiFetch: vi.fn(),
@@ -178,7 +180,7 @@ describe('LoginPage — loading state', () => {
 
     // Button should be disabled and show "...".
     await waitFor(() => {
-      const btn = screen.getByRole('button')
+      const btn = screen.getByRole('button', { name: /\.\.\./i })
       expect(btn).toBeDisabled()
       expect(btn).toHaveTextContent('...')
     })
@@ -186,7 +188,7 @@ describe('LoginPage — loading state', () => {
     // Unblock login and let the component settle.
     await act(async () => { resolveLogin() })
     await waitFor(() => {
-      expect(screen.getByRole('button')).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /log in/i })).not.toBeDisabled()
     })
   })
 
@@ -201,7 +203,7 @@ describe('LoginPage — loading state', () => {
     await user.click(screen.getByRole('button', { name: /log in/i }))
 
     await waitFor(() => {
-      expect(screen.getByRole('button')).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /log in/i })).not.toBeDisabled()
     })
   })
 
@@ -217,7 +219,7 @@ describe('LoginPage — loading state', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Bad creds')).toBeInTheDocument()
-      expect(screen.getByRole('button')).not.toBeDisabled()
+      expect(screen.getByRole('button', { name: /log in/i })).not.toBeDisabled()
     })
   })
 })
@@ -264,6 +266,31 @@ describe('LoginPage — calls login() on submit', () => {
     await waitFor(() => {
       expect(mockLogin).toHaveBeenCalledWith('  user with spaces  ', 'pass123')
     })
+  })
+})
+
+describe('LoginPage — guest mode', () => {
+  beforeEach(() => { mockLoginAsGuest.mockReset() })
+
+  it('renders a "Try as guest" button', async () => {
+    renderLoginPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /try as guest/i })).toBeInTheDocument())
+  })
+
+  it('calls loginAsGuest when clicked', async () => {
+    mockLoginAsGuest.mockResolvedValue({})
+    const { user } = renderLoginPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /try as guest/i })).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /try as guest/i }))
+    await waitFor(() => expect(mockLoginAsGuest).toHaveBeenCalledTimes(1))
+  })
+
+  it('shows the error when guest spots are full', async () => {
+    mockLoginAsGuest.mockRejectedValue(new Error('Guest spots are full, please try again shortly.'))
+    const { user } = renderLoginPage()
+    await waitFor(() => expect(screen.getByRole('button', { name: /try as guest/i })).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /try as guest/i }))
+    await waitFor(() => expect(screen.getByText(/full/i)).toBeInTheDocument())
   })
 })
 

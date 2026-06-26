@@ -9,7 +9,7 @@ const pageVariants = {
 }
 
 export default function LoginPage() {
-  const { login } = useAuth()
+  const { login, loginAsGuest } = useAuth()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -22,6 +22,18 @@ export default function LoginPage() {
 
     try {
       await login(username, password)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGuest = async () => {
+    setError('')
+    setLoading(true)
+    try {
+      await loginAsGuest()
     } catch (err) {
       setError(err.message)
     } finally {
@@ -112,6 +124,24 @@ export default function LoginPage() {
               {loading ? '...' : '🔑 Log In'}
             </motion.button>
           </form>
+
+          <div style={{ marginTop: 16, textAlign: 'center' }}>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', marginBottom: 10 }}>
+              or
+            </div>
+            <button
+              type="button"
+              onClick={handleGuest}
+              disabled={loading}
+              className="btn-secondary"
+              style={{ width: '100%', padding: '12px 0', fontSize: '0.95rem', opacity: loading ? 0.7 : 1 }}
+            >
+              👋 Try as guest
+            </button>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: 8 }}>
+              Explore for 1 hour — no signup. Sample sets included; data is cleared afterward.
+            </p>
+          </div>
         </div>
       </motion.div>
     </div>

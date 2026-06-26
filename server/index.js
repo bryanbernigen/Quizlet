@@ -71,6 +71,16 @@ async function purgeExpiredGuests() {
   await query(`DELETE FROM users WHERE is_guest = TRUE AND expires_at < ${now()}`, []);
 }
 
+// Returns whether the user is a guest and how many sets they currently own.
+async function guestSetCount(userId) {
+  const { rows } = await query(
+    `SELECT u.is_guest, ${int('(SELECT COUNT(*) FROM sets WHERE user_id = u.id)')} AS set_count
+     FROM users u WHERE u.id = $1`,
+    [userId]
+  );
+  return { isGuest: !!rows[0]?.is_guest, setCount: Number(rows[0]?.set_count || 0) };
+}
+
 // ==================== AUTH ENDPOINTS ====================
 
 app.post('/api/auth/login', async (req, res) => {
@@ -237,6 +247,16 @@ app.post('/api/sets', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Name and cards array are required' });
   }
 
+  const { isGuest, setCount } = await guestSetCount(req.userId);
+  if (isGuest) {
+    if (setCount >= GUEST_MAX_SETS) {
+      return res.status(403).json({ error: `Guest accounts are limited to ${GUEST_MAX_SETS} sets.` });
+    }
+    if (cards.length > GUEST_MAX_CARDS_PER_SET) {
+      return res.status(403).json({ error: `Guest sets are limited to ${GUEST_MAX_CARDS_PER_SET} cards.` });
+    }
+  }
+
   const client = await getClient();
   try {
     await client.query('BEGIN');
@@ -307,6 +327,13 @@ app.put('/api/sets/:id', requireAuth, async (req, res) => {
   }
   if (existing[0].user_id !== req.userId) {
     return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  if (cards && Array.isArray(cards)) {
+    const { isGuest } = await guestSetCount(req.userId);
+    if (isGuest && cards.length > GUEST_MAX_CARDS_PER_SET) {
+      return res.status(403).json({ error: `Guest sets are limited to ${GUEST_MAX_CARDS_PER_SET} cards.` });
+    }
   }
 
   const client = await getClient();
@@ -789,6 +816,16 @@ app.post('/api/import', requireAuth, async (req, res) => {
   const validSets = importedSets.filter(s => s.name && s.cards && s.cards.length > 0);
   if (validSets.length === 0) {
     return res.json({ message: 'Import successful', setsCreated: 0, setsUpdated: 0, cardsCreated: 0, cardsUpdated: 0 });
+  }
+
+  const { isGuest, setCount } = await guestSetCount(req.userId);
+  if (isGuest) {
+    const tooManyCards = validSets.some(s => s.cards.length > GUEST_MAX_CARDS_PER_SET);
+    if (validSets.length > GUEST_MAX_SETS || setCount + validSets.length > GUEST_MAX_SETS || tooManyCards) {
+      return res.status(403).json({
+        error: `Guest imports are limited to ${GUEST_MAX_SETS} sets and ${GUEST_MAX_CARDS_PER_SET} cards per set.`,
+      });
+    }
   }
 
   const setNames = validSets.map(s => s.name);

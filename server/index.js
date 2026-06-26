@@ -106,7 +106,13 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.post('/api/auth/logout', requireAuth, async (req, res) => {
   const token = req.headers.authorization.slice(7);
-  await query('DELETE FROM sessions WHERE token = $1', [token]);
+  const { rows } = await query('SELECT is_guest FROM users WHERE id = $1', [req.userId]);
+  if (rows[0]?.is_guest) {
+    // Guest data is throwaway — delete the account (cascade) to free a slot.
+    await query('DELETE FROM users WHERE id = $1', [req.userId]);
+  } else {
+    await query('DELETE FROM sessions WHERE token = $1', [token]);
+  }
   res.json({ message: 'Logged out' });
 });
 

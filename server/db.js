@@ -215,6 +215,37 @@ async function initDbPostgres() {
     END $$
   `);
 
+  // Guest-mode columns on users
+  await query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_name='users' AND column_name='is_guest') THEN
+        ALTER TABLE users ADD COLUMN is_guest BOOLEAN NOT NULL DEFAULT FALSE;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_name='users' AND column_name='expires_at') THEN
+        ALTER TABLE users ADD COLUMN expires_at TIMESTAMPTZ;
+      END IF;
+    END $$
+  `);
+
+  // Key-value settings store
+  await query(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('guest_ttl_minutes', '60')
+     ON CONFLICT (key) DO NOTHING`
+  );
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ('guest_max_concurrent', '10')
+     ON CONFLICT (key) DO NOTHING`
+  );
+
   // Add sharing columns to sets table for existing deployments
   await query(`
     DO $$
@@ -277,6 +308,7 @@ async function initDbPostgres() {
     'CREATE INDEX IF NOT EXISTS idx_sets_updated_at ON sets(updated_at)',
     'CREATE INDEX IF NOT EXISTS idx_sets_share_token ON sets(share_token)',
     'CREATE INDEX IF NOT EXISTS idx_sets_original_set_id ON sets(original_set_id)',
+    'CREATE INDEX IF NOT EXISTS idx_users_is_guest_expires ON users(is_guest, expires_at)',
   ]) {
     await query(sql);
   }
@@ -352,6 +384,32 @@ async function initDbSqlite() {
     sqliteDb.exec("ALTER TABLE sessions ADD COLUMN expires_at TEXT");
     sqliteDb.exec("UPDATE sessions SET expires_at = datetime('now', '+30 days') WHERE expires_at IS NULL");
   }
+
+  // Guest-mode columns on users
+  const userCols2 = sqliteDb.pragma('table_info(users)').map(c => c.name);
+  if (!userCols2.includes('is_guest')) {
+    sqliteDb.exec('ALTER TABLE users ADD COLUMN is_guest INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!userCols2.includes('expires_at')) {
+    sqliteDb.exec('ALTER TABLE users ADD COLUMN expires_at TEXT');
+  }
+
+  // Key-value settings store
+  sqliteDb.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  sqliteDb.prepare(
+    `INSERT INTO app_settings (key, value) VALUES ('guest_ttl_minutes', '60')
+     ON CONFLICT (key) DO NOTHING`
+  ).run();
+  sqliteDb.prepare(
+    `INSERT INTO app_settings (key, value) VALUES ('guest_max_concurrent', '10')
+     ON CONFLICT (key) DO NOTHING`
+  ).run();
+  sqliteDb.exec('CREATE INDEX IF NOT EXISTS idx_users_is_guest_expires ON users(is_guest, expires_at)');
 
   // Add sharing columns to sets table for existing deployments
   const setCols = sqliteDb.pragma('table_info(sets)').map(c => c.name);
@@ -477,4 +535,19 @@ export async function verifyPassword(password, stored) {
 
 export function generateToken() {
   return crypto.randomBytes(32).toString('hex');
+}
+
+// ==================== APP SETTINGS ====================
+
+export async function getSetting(key, defaultValue) {
+  const { rows } = await query('SELECT value FROM app_settings WHERE key = $1', [key]);
+  return rows.length > 0 ? rows[0].value : defaultValue;
+}
+
+export async function setSetting(key, value) {
+  await query(
+    `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
+    [key, String(value)]
+  );
 }

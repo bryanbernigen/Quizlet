@@ -1,12 +1,22 @@
 import crypto from 'crypto';
 import express from 'express';
 import cors from 'cors';
-import { query, getClient, initDb, hashPassword, verifyPassword, generateToken } from './db.js';
+import { query, getClient, initDb, hashPassword, verifyPassword, generateToken, getSetting, setSetting } from './db.js';
+import { seedGuestContent } from './guestSeed.js';
 
 // Cross-driver SQL snippets
 const now = () => process.env.DB_TYPE === 'sqlite' ? "datetime('now')" : 'NOW()';
 const int = (expr) => process.env.DB_TYPE === 'sqlite' ? expr : `${expr}::int`;
 const float = (expr) => process.env.DB_TYPE === 'sqlite' ? expr : `${expr}::float`;
+
+// Guest resource caps (fixed; not admin-editable)
+const GUEST_MAX_SETS = 5;
+const GUEST_MAX_CARDS_PER_SET = 100;
+
+// Cross-driver "now + N minutes" expression. $idx is the bound minutes param.
+const inMinutes = (idx) => process.env.DB_TYPE === 'sqlite'
+  ? `datetime('now', '+' || $${idx} || ' minutes')`
+  : `(NOW() + ($${idx} || ' minutes')::interval)`;
 
 const app = express();
 
@@ -55,6 +65,12 @@ async function requireAdmin(req, res, next) {
   next();
 }
 
+// Delete guests whose timer has elapsed. The user-row cascade removes their
+// sets, cards, quiz_history, and sessions. Called before any guest count.
+async function purgeExpiredGuests() {
+  await query(`DELETE FROM users WHERE is_guest = TRUE AND expires_at < ${now()}`, []);
+}
+
 // ==================== AUTH ENDPOINTS ====================
 
 app.post('/api/auth/login', async (req, res) => {
@@ -86,11 +102,59 @@ app.post('/api/auth/logout', requireAuth, async (req, res) => {
 
 app.get('/api/auth/me', requireAuth, async (req, res) => {
   const { rows } = await query(
-    'SELECT id, username, is_admin, created_at FROM users WHERE id = $1',
+    'SELECT id, username, is_admin, is_guest, expires_at, created_at FROM users WHERE id = $1',
     [req.userId]
   );
   if (!rows[0]) return res.status(404).json({ error: 'User not found' });
   res.json(rows[0]);
+});
+
+// Start a time-boxed guest session: throwaway account + seeded sample content.
+app.post('/api/auth/guest', async (_req, res) => {
+  await purgeExpiredGuests();
+
+  const maxConcurrent = parseInt(await getSetting('guest_max_concurrent', '10'), 10) || 10;
+  const { rows: countRows } = await query(
+    `SELECT ${int('COUNT(*)')} AS n FROM users WHERE is_guest = TRUE AND expires_at > ${now()}`,
+    []
+  );
+  if (Number(countRows[0].n) >= maxConcurrent) {
+    return res.status(503).json({ error: 'Guest spots are full, please try again shortly.' });
+  }
+
+  const ttlMinutes = parseInt(await getSetting('guest_ttl_minutes', '60'), 10) || 60;
+  const username = `guest_${crypto.randomBytes(3).toString('hex')}`;
+  const throwawayHash = await hashPassword(crypto.randomBytes(16).toString('hex'));
+
+  const client = await getClient();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `INSERT INTO users (username, password_hash, is_admin, is_guest, expires_at)
+       VALUES ($1, $2, FALSE, TRUE, ${inMinutes(3)}) RETURNING id, username, expires_at`,
+      [username, throwawayHash, ttlMinutes]
+    );
+    const guest = rows[0];
+
+    await seedGuestContent(client, guest.id);
+
+    const token = generateToken();
+    await client.query(
+      `INSERT INTO sessions (token, user_id, expires_at) VALUES ($1, $2, ${inMinutes(3)})`,
+      [token, guest.id, ttlMinutes]
+    );
+
+    await client.query('COMMIT');
+    res.status(201).json({
+      token,
+      user: { id: guest.id, username: guest.username, is_admin: false, is_guest: true, expires_at: guest.expires_at },
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
 });
 
 // ==================== ADMIN: USER MANAGEMENT ====================

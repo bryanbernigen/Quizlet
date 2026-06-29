@@ -21,16 +21,71 @@ export default function ProfilePage() {
   const [newUser, setNewUser] = useState({ username: '', password: '', is_admin: false })
   const [userStatus, setUserStatus] = useState(null)
   const [creatingUser, setCreatingUser] = useState(false)
+  const [guests, setGuests] = useState(null)
+  const [settings, setSettings] = useState(null)
+  const [settingsForm, setSettingsForm] = useState({ guest_ttl_minutes: '', guest_max_concurrent: '' })
+  const [settingsStatus, setSettingsStatus] = useState(null)
 
   useEffect(() => {
     if (user?.is_admin) {
       loadUsers()
+      loadGuests()
+      loadSettings()
     }
   }, [user])
 
   const loadUsers = async () => {
     const res = await apiFetch('/api/admin/users')
     if (res.ok) setUsers(await res.json())
+  }
+
+  const loadGuests = async () => {
+    const res = await apiFetch('/api/admin/guests')
+    if (res.ok) setGuests(await res.json())
+  }
+
+  const loadSettings = async () => {
+    const res = await apiFetch('/api/admin/settings')
+    if (res.ok) {
+      const s = await res.json()
+      setSettings(s)
+      setSettingsForm({
+        guest_ttl_minutes: String(s.guest_ttl_minutes),
+        guest_max_concurrent: String(s.guest_max_concurrent),
+      })
+    }
+  }
+
+  const handleTerminateGuest = async (guestId) => {
+    const res = await apiFetch(`/api/admin/users/${guestId}`, { method: 'DELETE' })
+    if (res.ok) loadGuests()
+  }
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault()
+    setSettingsStatus(null)
+    const res = await apiFetch('/api/admin/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        guest_ttl_minutes: Number(settingsForm.guest_ttl_minutes),
+        guest_max_concurrent: Number(settingsForm.guest_max_concurrent),
+      }),
+    })
+    const data = await res.json()
+    if (res.ok) {
+      setSettings(data)
+      setSettingsStatus({ type: 'success', message: '✓ Saved' })
+      loadGuests()
+    } else {
+      setSettingsStatus({ type: 'error', message: data.error || 'Save failed' })
+    }
+  }
+
+  const guestTimeLeft = (expiresAt) => {
+    const norm = expiresAt.includes('T') ? expiresAt : expiresAt.replace(' ', 'T') + 'Z'
+    const total = Math.max(0, Math.floor((new Date(norm).getTime() - Date.now()) / 1000))
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
   }
 
   const handleLogout = async () => {
@@ -330,6 +385,82 @@ export default function ProfilePage() {
               ))}
             </div>
           )}
+
+          {/* Guest settings */}
+          <div className="glass-card" style={{ padding: 24, marginTop: 24, maxWidth: 480 }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>Guest Settings</h3>
+            <form onSubmit={handleSaveSettings} style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div>
+                <label className="form-label" htmlFor="guest_ttl">Guest duration (minutes)</label>
+                <input id="guest_ttl" className="form-input" type="number" min="1"
+                  value={settingsForm.guest_ttl_minutes}
+                  onChange={e => setSettingsForm(f => ({ ...f, guest_ttl_minutes: e.target.value }))} />
+              </div>
+              <div>
+                <label className="form-label" htmlFor="guest_max">Max concurrent guests</label>
+                <input id="guest_max" className="form-input" type="number" min="1"
+                  value={settingsForm.guest_max_concurrent}
+                  onChange={e => setSettingsForm(f => ({ ...f, guest_max_concurrent: e.target.value }))} />
+              </div>
+              <button type="submit" className="btn-primary" style={{ padding: '10px 20px' }}>Save guest settings</button>
+            </form>
+            {settingsStatus && (
+              <div style={{ marginTop: 12, fontSize: '0.85rem', fontWeight: 600,
+                color: settingsStatus.type === 'error' ? 'var(--accent-red)' : 'var(--accent-green)' }}>
+                {settingsStatus.message}
+              </div>
+            )}
+          </div>
+
+          {/* Active guests */}
+          <div className="glass-card" style={{ padding: 24, marginTop: 24 }}>
+            <h3 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: 16 }}>
+              Active Guests {guests && `(${guests.length}${settings ? ' / ' + settings.guest_max_concurrent : ''})`}
+            </h3>
+            {guests && guests.length === 0 && (
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>No active guests right now.</p>
+            )}
+            {guests && guests.length > 0 && (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', color: 'var(--text-secondary)' }}>
+                      <th style={{ padding: '6px 8px' }}>Guest</th>
+                      <th style={{ padding: '6px 8px' }}>Started</th>
+                      <th style={{ padding: '6px 8px' }}>Time left</th>
+                      <th style={{ padding: '6px 8px' }}>Sets</th>
+                      <th style={{ padding: '6px 8px' }}>Cards</th>
+                      <th style={{ padding: '6px 8px' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {guests.map(g => (
+                      <tr key={g.id} style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+                        <td style={{ padding: '8px' }}>{g.username}</td>
+                        <td style={{ padding: '8px' }}>{new Date(g.created_at.includes('T') ? g.created_at : g.created_at.replace(' ', 'T') + 'Z').toLocaleTimeString()}</td>
+                        <td style={{ padding: '8px' }}>{guestTimeLeft(g.expires_at)}</td>
+                        <td style={{ padding: '8px' }}>{g.set_count}</td>
+                        <td style={{ padding: '8px' }}>{g.card_count}</td>
+                        <td style={{ padding: '8px' }}>
+                          <button
+                            onClick={() => handleTerminateGuest(g.id)}
+                            style={{
+                              padding: '4px 12px', borderRadius: 8,
+                              background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--accent-red)',
+                              color: 'var(--accent-red)', fontWeight: 600, fontSize: '0.8rem',
+                              cursor: 'pointer', fontFamily: 'inherit',
+                            }}
+                          >
+                            Terminate
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

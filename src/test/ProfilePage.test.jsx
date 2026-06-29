@@ -45,6 +45,39 @@ function errResponse(status = 500, data = { error: 'Server error' }) {
   return { ok: false, status, json: () => Promise.resolve(data) }
 }
 
+// URL-aware mock for the admin views. The admin page fires three loads on mount
+// (/api/admin/users, /api/admin/guests, /api/admin/settings) plus mutation
+// calls, so order-based mockResolvedValueOnce is too fragile — route by URL.
+function installAdminApi({ users = [], guests = [], settings = { guest_ttl_minutes: 60, guest_max_concurrent: 10 }, overrides = {} } = {}) {
+  const state = { users: [...users], guests: [...guests], settings: { ...settings } }
+  apiFetchMock.mockImplementation((url, options = {}) => {
+    const method = options.method || 'GET'
+    const key = `${method} ${url}`
+    if (key in overrides) return Promise.resolve(overrides[key])
+    if (url === '/api/admin/users' && method === 'GET') return Promise.resolve(okResponse(state.users))
+    if (url === '/api/admin/guests' && method === 'GET') return Promise.resolve(okResponse(state.guests))
+    if (url === '/api/admin/settings' && method === 'GET') return Promise.resolve(okResponse(state.settings))
+    if (url === '/api/admin/settings' && method === 'PUT') {
+      state.settings = { ...state.settings, ...JSON.parse(options.body) }
+      return Promise.resolve(okResponse(state.settings))
+    }
+    if (url === '/api/admin/users' && method === 'POST') {
+      const body = JSON.parse(options.body)
+      const u = { id: 99, username: body.username, is_admin: !!body.is_admin, created_at: '2024-03-01' }
+      state.users = [...state.users, u]
+      return Promise.resolve(okResponse({ user: u }))
+    }
+    if (/\/api\/admin\/users\/\d+$/.test(url) && method === 'DELETE') {
+      const id = Number(url.split('/').pop())
+      state.users = state.users.filter(u => u.id !== id)
+      state.guests = state.guests.filter(g => g.id !== id)
+      return Promise.resolve(okResponse({ deleted: true }))
+    }
+    return Promise.resolve(okResponse({}))
+  })
+  return state
+}
+
 import ProfilePage from '../pages/ProfilePage'
 
 // --- DOM mocks ---
@@ -144,10 +177,10 @@ describe('ProfilePage', () => {
 
   // --- Admin mode ---
   it('admin sees user management section', async () => {
-    apiFetchMock.mockResolvedValueOnce(okResponse([
+    installAdminApi({ users: [
       { id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' },
       { id: 2, username: 'alice', is_admin: false, created_at: '2024-02-01' },
-    ]))
+    ] })
     renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
     await waitFor(() => {
       expect(screen.getByText(/User Management/)).toBeInTheDocument()
@@ -156,10 +189,10 @@ describe('ProfilePage', () => {
   })
 
   it('admin lists users with join date', async () => {
-    apiFetchMock.mockResolvedValueOnce(okResponse([
+    installAdminApi({ users: [
       { id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' },
       { id: 2, username: 'alice', is_admin: false, created_at: '2024-02-15' },
-    ]))
+    ] })
     renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
     await waitFor(() => {
       expect(screen.getAllByText(/^alice$/).length).toBeGreaterThan(0)
@@ -169,18 +202,14 @@ describe('ProfilePage', () => {
   })
 
   it('admin has ADMIN badge', async () => {
-    apiFetchMock.mockResolvedValueOnce(okResponse([{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }]))
+    installAdminApi({ users: [{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }] })
     renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
     await waitFor(() => expect(screen.getByText(/^admin$/)).toBeInTheDocument())
     expect(screen.getAllByText('ADMIN').length).toBeGreaterThan(0)
   })
 
   it('create user form calls API', async () => {
-    const newUser = { id: 3, username: 'bob', is_admin: false, created_at: '2024-03-01' }
-    apiFetchMock
-      .mockResolvedValueOnce(okResponse([{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }]))
-      .mockResolvedValueOnce(okResponse({ user: newUser }))
-      .mockResolvedValueOnce(okResponse([{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }, newUser]))
+    installAdminApi({ users: [{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }] })
     renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
     await waitFor(() => screen.getByText(/Create New User/))
     await userEvent.type(screen.getByPlaceholderText('At least 3 characters'), 'bob')
@@ -190,9 +219,10 @@ describe('ProfilePage', () => {
   })
 
   it('create user form shows error on failure', async () => {
-    apiFetchMock
-      .mockResolvedValueOnce(okResponse([{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }]))
-      .mockResolvedValueOnce(errResponse(400, { error: 'Username already taken' }))
+    installAdminApi({
+      users: [{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }],
+      overrides: { 'POST /api/admin/users': errResponse(400, { error: 'Username already taken' }) },
+    })
     renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
     await waitFor(() => screen.getByText(/Create New User/))
     await userEvent.type(screen.getByPlaceholderText('At least 3 characters'), 'takenuser')
@@ -202,13 +232,10 @@ describe('ProfilePage', () => {
   })
 
   it('delete button removes user from list', async () => {
-    apiFetchMock
-      .mockResolvedValueOnce(okResponse([
-        { id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' },
-        { id: 2, username: 'alice', is_admin: false, created_at: '2024-02-01' },
-      ]))
-      .mockResolvedValueOnce(okResponse({ deleted: true }))
-      .mockResolvedValueOnce(okResponse([{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }]))
+    installAdminApi({ users: [
+      { id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' },
+      { id: 2, username: 'alice', is_admin: false, created_at: '2024-02-01' },
+    ] })
     const origConfirm = window.confirm
     window.confirm = vi.fn(() => true)
     renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
@@ -221,10 +248,38 @@ describe('ProfilePage', () => {
   })
 
   it('admin cannot delete own account', async () => {
-    apiFetchMock.mockResolvedValueOnce(okResponse([{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }]))
+    installAdminApi({ users: [{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }] })
     renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
     await waitFor(() => expect(screen.getByText(/^admin$/)).toBeInTheDocument())
     expect(screen.queryAllByText('Delete')).toHaveLength(0)
+  })
+
+  // --- Guest management ---
+  it('renders active guests and terminates one', async () => {
+    installAdminApi({
+      users: [{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }],
+      guests: [{ id: 5, username: 'guest_abc', created_at: '2024-05-01T10:00:00Z',
+                 expires_at: new Date(Date.now() + 30 * 60000).toISOString(), set_count: 2, card_count: 11 }],
+    })
+    renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
+    await waitFor(() => expect(screen.getByText('guest_abc')).toBeInTheDocument())
+
+    await userEvent.click(screen.getByRole('button', { name: /terminate/i }))
+    await waitFor(() =>
+      expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/users/5', expect.objectContaining({ method: 'DELETE' }))
+    )
+  })
+
+  it('saves guest settings', async () => {
+    installAdminApi({ users: [{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' }] })
+    renderWithAuth({ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01' })
+    await waitFor(() => expect(screen.getByLabelText(/guest duration/i)).toBeInTheDocument())
+    await userEvent.clear(screen.getByLabelText(/guest duration/i))
+    await userEvent.type(screen.getByLabelText(/guest duration/i), '30')
+    await userEvent.click(screen.getByRole('button', { name: /save guest settings/i }))
+    await waitFor(() =>
+      expect(apiFetchMock).toHaveBeenCalledWith('/api/admin/settings', expect.objectContaining({ method: 'PUT' }))
+    )
   })
 
   it('non-admin does not see user management', async () => {
